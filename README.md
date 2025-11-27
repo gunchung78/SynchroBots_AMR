@@ -1,1 +1,1 @@
-# SynchroBots_AGV
+# SynchroBots_AMR
