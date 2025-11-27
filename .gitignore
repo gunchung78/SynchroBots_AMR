@@ -1,0 +1,67 @@
+#############################
+# STM32 / ARM 빌드 산출물
+#############################
+# 빌드 디렉토리
+Debug/
+Release/
+**/Debug/
+**/Release/
+
+# 오브젝트 / 의존성 파일
+*.o
+*.obj
+*.d
+*.su
+
+# 링크 결과물 / 바이너리
+*.elf
+*.axf
+*.out
+*.map
+*.lst
+*.lss
+*.list
+*.map
+*.hex
+*.bin
+*.srec
+
+# 로그 / 리포트
+*.log
+*.tmp
+*.bak
+
+#############################
+# STM32CubeIDE / Eclipse 관련
+#############################
+# 캐시 / 설정(개인 환경에 따라 달라지는 부분)
+.settings/
+.metadata/
+.externalToolBuilders/
+.arm/
+*.launch
+
+#############################
+# OS / 에디터 공통
+#############################
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# VSCode (사용 시)
+.vscode/
+
+# 기타 에디터
+*.swp
+*.swo
+*.user
+
+#############################
+# CMake나 기타 빌드 시스템 사용 시(있으면)
+#############################
+build/
+cmake-build-*/
