@@ -1,0 +1,38 @@
+local_costmap:
+  global_frame: odom
+  robot_base_frame: base_footprint
+
+  rolling_window: true
+  width: 3.0
+  height: 3.0
+  resolution: 0.05           # 맵 해상도(예: 0.05)와 일치 권장
+  update_frequency: 10.0     # 로컬은 빠르게
+  publish_frequency: 5.0
+  transform_tolerance: 0.5
+
+  plugins:
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+# 로봇 발자국(글로벌/로컬 공통으로 한 곳에 두어도 됨)
+footprint: [[0.16, 0.12], [0.16, -0.12], [-0.16, -0.12], [-0.16, 0.12]]
+
+# 장애물 레이어 설정(라이다 X2 기준)
+obstacle_layer:
+  observation_sources: scan
+  scan:
+    sensor_frame: laser_frame
+    data_type: LaserScan
+    topic: scan
+    marking: true
+    clearing: true
+    inf_is_valid: true
+  obstacle_range: 4.0        # 실사용 가시거리보다 약간 보수
+  raytrace_range: 6.0
+  max_obstacle_height: 0.35  # 라이다 높이+여유
+
+# 인플레이션(로봇 주변 안전 여유)
+inflation_layer:
+  inflation_radius: 0.10 # 0.30 11-15
+  cost_scaling_factor: 3.0
+

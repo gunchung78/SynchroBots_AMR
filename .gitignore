@@ -65,3 +65,12 @@ Desktop.ini
 #############################
 build/
 cmake-build-*/
+
+
+AMR_ROS/AMR_pi-bottom/build/
+AMR_ROS/AMR_pi-bottom/devel/
+AMR_ROS/AMR_pi-bottom/third_party/
+
+AMR_ROS/AMR_pi-top/build/
+AMR_ROS/AMR_pi-top/devel/
+AMR_ROS/AMR_pi-top/third_party/
