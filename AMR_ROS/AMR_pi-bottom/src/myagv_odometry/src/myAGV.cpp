@@ -195,7 +195,7 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
 {
     if (movex == 10 && movey == 10 && rot == 10)
     {
-        char buf[7] = {0xfe, 0xfe ,0x01 ,0x01 ,0x01 ,0x03};
+        unsigned char buf[7] = {0xfe, 0xfe ,0x01 ,0x01 ,0x01 ,0x03};
         boost::asio::write(sp, boost::asio::buffer(buf));
         unsigned char buf_header[1] = {0};
 
@@ -258,7 +258,7 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
     unsigned char rot_send = static_cast<signed char>(rot * 100) + 128;
     unsigned char check = x_send + y_send + rot_send;
 
-    char buf[8] = { 0 };
+    unsigned char buf[8] = { 0 };
     buf[0] = header[0];
     buf[1] = header[1];
     buf[2] = x_send;
@@ -609,7 +609,7 @@ void MyAGV::execute(double linearX, double linearY, double angularZ)
 //
 //void MyAGV::imuCallback(const sensor_msgs::Imu::ConstPtr& msg)
 //{
-//    // Quaternion ¡æ Yaw º¯È¯
+//    // Quaternion ï¿½ï¿½ Yaw ï¿½ï¿½È¯
 //    tf::Quaternion q(
 //        msg->orientation.x,
 //        msg->orientation.y,
