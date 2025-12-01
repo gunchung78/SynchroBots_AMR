@@ -57,7 +57,11 @@ BNO055_HandleTypeDef hBNO055;
 float imu_heading_deg = 0.0f;
 float imu_roll_deg    = 0.0f;
 float imu_pitch_deg   = 0.0f;
-char uart_tx_buffer[100];
+float qw, qx, qy, qz;
+float gyro_x, gyro_y, gyro_z;
+float acc_x, acc_y, acc_z;
+
+char uart_tx_buffer[200];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,11 +75,23 @@ void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
 void IMU_SendData(float heading, float roll, float pitch);
+void IMU_SendFullData();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void IMU_SendFullData()
+{
+    int len = snprintf(uart_tx_buffer, sizeof(uart_tx_buffer),
+                       "QW:%.4f,QX:%.4f,QY:%.4f,QZ:%.4f,"
+                       "GX:%.4f,GY:%.4f,GZ:%.4f,"
+                       "AX:%.4f,AY:%.4f,AZ:%.4f\r\n",
+                       qw, qx, qy, qz,
+                       gyro_x, gyro_y, gyro_z,
+                       acc_x, acc_y, acc_z);
 
+    HAL_UART_Transmit(&huart2, (uint8_t *)uart_tx_buffer, len, HAL_MAX_DELAY);
+}
 /* USER CODE END 0 */
 
 /**
@@ -129,16 +145,32 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (BNO055_ReadEuler(&hBNO055,
-						   &imu_heading_deg,
-						   &imu_roll_deg,
-						   &imu_pitch_deg) == HAL_OK) {
-		  // 여기서 imu_heading_deg / imu_roll_deg / imu_pitch_deg 값을
-		  //  - 디버거 watch window로 보거나
-		  //  - UART로 printf 해서 확인하면 됨
-		  IMU_SendData(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
-	  }
-      HAL_Delay(80);  // 아두이노 예제와 비슷하게 80ms 주기
+//	  if (BNO055_ReadEuler(&hBNO055,
+//						   &imu_heading_deg,
+//						   &imu_roll_deg,
+//						   &imu_pitch_deg) == HAL_OK) {
+//		  // 여기서 imu_heading_deg / imu_roll_deg / imu_pitch_deg 값을
+//		  //  - 디버거 watch window로 보거나
+//		  //  - UART로 printf 해서 확인하면 됨
+//		  IMU_SendData(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
+//	  }
+//      HAL_Delay(80);  // 아두이노 예제와 비슷하게 80ms 주기
+		/* --------------------------
+	  	  1) Quaternion 읽기  ★ 추가됨
+		--------------------------- */
+		BNO055_ReadQuaternion(&hBNO055, &qw, &qx, &qy, &qz);
+
+		/* --------------------------
+		  2) Gyro(rad/s) 읽기 ★ 추가됨
+		--------------------------- */
+		BNO055_ReadGyro(&hBNO055, &gyro_x, &gyro_y, &gyro_z);
+
+		/* --------------------------
+		  3) Linear Acceleration(m/s²) 읽기 ★ 추가됨
+		--------------------------- */
+		BNO055_ReadAcceleration(&hBNO055, &acc_x, &acc_y, &acc_z);
+
+		IMU_SendFullData();
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
