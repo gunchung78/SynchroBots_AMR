@@ -39,7 +39,35 @@ Release/
 .metadata/
 .externalToolBuilders/
 .arm/
-*.launch
+
+#############################
+# ROS1 Noetic / Catkin 빌드 산출물
+#############################
+# catkin 워크스페이스 공통
+devel/
+build/
+logs/
+install/
+.devel_isolated/
+.build_isolated/
+
+# catkin_tools 메타데이터
+.catkin_tools/
+
+# CMake / catkin 생성물
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+catkin_generated/
+
+# Python 캐시 (ROS 노드용)
+__pycache__/
+*.pyc
+
+# ROS bag 파일
+*.bag
+*.bag.active
+*.bag.metadata
 
 #############################
 # OS / 에디터 공통
@@ -63,14 +91,17 @@ Desktop.ini
 #############################
 # CMake나 기타 빌드 시스템 사용 시(있으면)
 #############################
-build/
 cmake-build-*/
 
-
+#############################
+# 프로젝트별 ROS 워크스페이스 (명시)
+#############################
 AMR_ROS/AMR_pi-bottom/build/
 AMR_ROS/AMR_pi-bottom/devel/
+AMR_ROS/AMR_pi-bottom/logs/
 AMR_ROS/AMR_pi-bottom/third_party/
 
 AMR_ROS/AMR_pi-top/build/
 AMR_ROS/AMR_pi-top/devel/
+AMR_ROS/AMR_pi-top/logs/
 AMR_ROS/AMR_pi-top/third_party/
