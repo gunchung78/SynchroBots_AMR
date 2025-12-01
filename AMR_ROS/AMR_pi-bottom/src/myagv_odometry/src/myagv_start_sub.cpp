@@ -1,5 +1,7 @@
 #include "myagv_odometry/myAGV.h"
+#include "sensor_msgs/Imu.h"
 #include <iostream>
+#include <tf/tf.h>
 
 double linearX = 0.0;
 double linearY = 0.0;
@@ -11,6 +13,12 @@ void cmdCallback(const geometry_msgs::Twist& msg)
 	linearY = msg.linear.y;
 	angularZ = msg.angular.z;
 
+}
+
+void imuCallback(const sensor_msgs::Imu& msg)
+{
+  imu_received = true;
+  imu_yaw = tf::getYaw(msg.orientation); // quaternion ¡æ yaw
 }
 
 int main(int argc, char* argv[])

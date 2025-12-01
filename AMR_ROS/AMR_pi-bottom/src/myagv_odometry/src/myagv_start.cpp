@@ -8,6 +8,10 @@
 
 //const unsigned char ender[2] = { 0x0d, 0x0a };
 const unsigned char header[2] = { 0xfe, 0xfe };
+
+bool imu_received = false;
+double imu_yaw = 0.0;
+
 //const int SPEED_INFO = 0xa55a;
 //const int GET_SPEED = 0xaaaa;
 //const double ROBOT_RADIUS = 105.00;
@@ -541,7 +545,16 @@ bool MyAGV::execute(double linearX, double linearY, double angularZ)
 
        x += delta_x;
        y += delta_y;
-       theta += delta_th;
+       if (imu_received)
+        {
+            // IMU yaw 를 직접 사용 (degree → rad 변환 필요하면 조정)
+            theta = imu_yaw;
+        }
+        else
+        {
+            // fallback
+            theta += delta_th;
+        }
        if (Offest_Count < OFFSET_COUNT)
 			{
 				Offest_Count++;
@@ -565,5 +578,5 @@ bool MyAGV::execute(double linearX, double linearY, double angularZ)
     } 
        lastTime = currentTime;
        
-        
+    return true;
 }
