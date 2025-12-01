@@ -1,0 +1,44 @@
+<launch>
+  <!-- ======= User-friendly Args (필요시 덮어쓰기) ======= -->
+  <arg name="file"                       default="$(env HOME)/MyAGV_Project/myagv_ros/src/multi_goals_navigation/config/goals.txt"/>
+  <arg name="frame_id"                   default="map"/>
+  <arg name="decision_checkpoint_idx"    default="1"/>
+  <arg name="left_idx"                   default="2"/>
+  <arg name="right_idx"                  default="4"/>
+  <arg name="decision_topic"             default="/yolo_result"/>
+  <arg name="default_decision"           default="0"/>
+  <arg name="decision_timeout_sec"       default="10.0"/>
+  <arg name="must_receive_decision"      default="true"/>
+  <arg name="dwell_sec"                  default="0.2"/>
+  <arg name="start_vision_in_terminal"   default="true"/>
+  <arg name="start_vision_once"          default="true"/>
+  <!-- ros_setup는 런치 내에서 source 할 수 없으니 사용하지 않습니다. (아래 '설정' 절 참고) -->
+  <arg name="ros_setup"                  default="$(env HOME)/MyAGV_Project/myagv_ros/devel/setup.bash"/>
+  <arg name="vision_cmd"                 default="rosrun multi_goals_navigation vision_orchestrator_runner.py"/>
+
+  <!-- ======= Multi-Goals Node ======= -->
+  <node pkg="multi_goals_navigation"
+        type="multi_goals_txt"
+        name="multi_goals_txt"
+        output="screen">
+
+    <!-- rosrun 의 _param:=… 과 동일: private params -->
+    <param name="file"                    value="$(arg file)"/>
+    <param name="frame_id"                value="$(arg frame_id)"/>
+    <param name="decision_checkpoint_idx" value="$(arg decision_checkpoint_idx)" />
+    <param name="left_idx"                value="$(arg left_idx)"/>
+    <param name="right_idx"               value="$(arg right_idx)"/>
+    <param name="decision_topic"          value="$(arg decision_topic)"/>
+    <param name="default_decision"        value="$(arg default_decision)"/>
+    <param name="decision_timeout_sec"    value="$(arg decision_timeout_sec)"/>
+    <param name="must_receive_decision"   value="$(arg must_receive_decision)"/>
+    <param name="dwell_sec"               value="$(arg dwell_sec)"/>
+
+    <param name="start_vision_in_terminal" value="$(arg start_vision_in_terminal)"/>
+    <param name="start_vision_once"        value="$(arg start_vision_once)"/>
+    <param name="vision_cmd"               value="$(arg vision_cmd)"/>
+    <param name="ros_setup"                value="$(arg ros_setup)"/>
+  </node>
+
+</launch>
+
