@@ -75,23 +75,23 @@ void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
 void IMU_SendData(float heading, float roll, float pitch);
-void IMU_SendFullData();
+//void IMU_SendFullData();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void IMU_SendFullData()
-{
-    int len = snprintf(uart_tx_buffer, sizeof(uart_tx_buffer),
-                       "QW:%.4f,QX:%.4f,QY:%.4f,QZ:%.4f,"
-                       "GX:%.4f,GY:%.4f,GZ:%.4f,"
-                       "AX:%.4f,AY:%.4f,AZ:%.4f\r\n",
-                       qw, qx, qy, qz,
-                       gyro_x, gyro_y, gyro_z,
-                       acc_x, acc_y, acc_z);
-
-    HAL_UART_Transmit(&huart2, (uint8_t *)uart_tx_buffer, len, HAL_MAX_DELAY);
-}
+//void IMU_SendFullData()
+//{
+//    int len = snprintf(uart_tx_buffer, sizeof(uart_tx_buffer),
+//                       "QW:%.4f,QX:%.4f,QY:%.4f,QZ:%.4f,"
+//                       "GX:%.4f,GY:%.4f,GZ:%.4f,"
+//                       "AX:%.4f,AY:%.4f,AZ:%.4f\r\n",
+//                       qw, qx, qy, qz,
+//                       gyro_x, gyro_y, gyro_z,
+//                       acc_x, acc_y, acc_z);
+//
+//    HAL_UART_Transmit(&huart2, (uint8_t *)uart_tx_buffer, len, HAL_MAX_DELAY);
+//}
 /* USER CODE END 0 */
 
 /**
@@ -127,7 +127,25 @@ int main(void)
   MX_I2S3_Init();
   MX_SPI1_Init();
   MX_USB_HOST_Init();
+
+  /* -----------------------------------------------
+   * ① UART2 TX 핀(PA2)을 INPUT 모드로 강제 설정
+   *    → 라즈베리파이 부팅 중 TX출력 충돌 방지
+   * ----------------------------------------------- */
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_2;     // PA2 = USART2_TX
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /* -----------------------------------------------
+   * ② 라즈베리파이 부팅 대기 (필요 시 2000~5000ms)
+   * ----------------------------------------------- */
+  HAL_Delay(5000);
+  /* -----------------------------------------------
+   * ③ 이제 UART2 초기화 (TX 핀이 활성화됨)
+   * ----------------------------------------------- */
   MX_USART2_UART_Init();
+
   /* USER CODE BEGIN 2 */
   uint8_t buffer[256];
 
@@ -145,32 +163,32 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  if (BNO055_ReadEuler(&hBNO055,
-//						   &imu_heading_deg,
-//						   &imu_roll_deg,
-//						   &imu_pitch_deg) == HAL_OK) {
-//		  // 여기서 imu_heading_deg / imu_roll_deg / imu_pitch_deg 값을
-//		  //  - 디버거 watch window로 보거나
-//		  //  - UART로 printf 해서 확인하면 됨
-//		  IMU_SendData(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
-//	  }
+	  if (BNO055_ReadEuler(&hBNO055,
+						   &imu_heading_deg,
+						   &imu_roll_deg,
+						   &imu_pitch_deg) == HAL_OK) {
+		  // 여기서 imu_heading_deg / imu_roll_deg / imu_pitch_deg 값을
+		  //  - 디버거 watch window로 보거나
+		  //  - UART로 printf 해서 확인하면 됨
+		  IMU_SendData(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
+	  }
 //      HAL_Delay(80);  // 아두이노 예제와 비슷하게 80ms 주기
 		/* --------------------------
 	  	  1) Quaternion 읽기  ★ 추가됨
 		--------------------------- */
-		BNO055_ReadQuaternion(&hBNO055, &qw, &qx, &qy, &qz);
+//		BNO055_ReadQuaternion(&hBNO055, &qw, &qx, &qy, &qz);
 
 		/* --------------------------
 		  2) Gyro(rad/s) 읽기 ★ 추가됨
 		--------------------------- */
-		BNO055_ReadGyro(&hBNO055, &gyro_x, &gyro_y, &gyro_z);
+//		BNO055_ReadGyro(&hBNO055, &gyro_x, &gyro_y, &gyro_z);
 
 		/* --------------------------
 		  3) Linear Acceleration(m/s²) 읽기 ★ 추가됨
 		--------------------------- */
-		BNO055_ReadAcceleration(&hBNO055, &acc_x, &acc_y, &acc_z);
+//		BNO055_ReadAcceleration(&hBNO055, &acc_x, &acc_y, &acc_z);
 
-		IMU_SendFullData();
+//		IMU_SendFullData();
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
