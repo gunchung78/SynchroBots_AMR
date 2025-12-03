@@ -1,0 +1,5 @@
+../Core/Src/bno055_stm32.c:26:26:BNO055_Write8	1
+../Core/Src/bno055_stm32.c:34:26:BNO055_Read	1
+../Core/Src/bno055_stm32.c:42:26:BNO055_SetOprMode	1
+../Core/Src/bno055_stm32.c:50:19:BNO055_Init	15
+../Core/Src/bno055_stm32.c:111:19:BNO055_ReadEuler	5
