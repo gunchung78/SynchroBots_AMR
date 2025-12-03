@@ -610,7 +610,7 @@ void MyAGV::execute(double linearX, double linearY, double angularZ)
 //
 //void MyAGV::imuCallback(const sensor_msgs::Imu::ConstPtr& msg)
 //{
-//    // Quaternion �� Yaw ��ȯ
+//    // Quaternion ?? Yaw ???
 //    tf::Quaternion q(
 //        msg->orientation.x,
 //        msg->orientation.y,

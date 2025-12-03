@@ -2,29 +2,40 @@
 #include <iostream>
 #include <iomanip>
 #include <time.h>
+#include <cstdint>  // uint8_t
 
 #include "myagv_odometry/myAGV.h"
 #include "std_msgs/Int8.h"
 
+#include <geometry_msgs/Vector3Stamped.h>  // ★ RPY용 메시지
+#include <tf/transform_datatypes.h>        // tf::createQuaternionMsgFromYaw
+
+//const unsigned char ender[2] = { 0x0d, 0x0a };
 const unsigned char header[2] = { 0xfe, 0xfe };
+//const int SPEED_INFO = 0xa55a;
+//const int GET_SPEED = 0xaaaa;
+//const double ROBOT_RADIUS = 105.00;
+//const double ROBOT_LENGTH = 210.50;
 
 boost::asio::io_service iosev;
+//boost::asio::serial_port sp(iosev, "/dev/ttyUSB0");
 boost::asio::serial_port sp(iosev, "/dev/ttyAMA2");
 
 boost::array<double, 36> odom_pose_covariance = {
     {1e-9, 0, 0, 0, 0, 0,
-    0, 1e-3, 1e-9, 0, 0, 0,
-    0, 0, 1e6, 0, 0, 0,
-    0, 0, 0, 1e6, 0, 0,
-    0, 0, 0, 0, 1e6, 0,
-    0, 0, 0, 0, 0, 1e-9} };
+     0, 1e-3, 1e-9, 0, 0, 0,
+     0, 0, 1e6, 0, 0, 0,
+     0, 0, 0, 1e6, 0, 0,
+     0, 0, 0, 0, 1e6, 0,
+     0, 0, 0, 0, 0, 1e-9} };
+
 boost::array<double, 36> odom_twist_covariance = {
     {1e-9, 0, 0, 0, 0, 0,
-    0, 1e-3, 1e-9, 0, 0, 0,
-    0, 0, 1e6, 0, 0, 0,
-    0, 0, 0, 1e6, 0, 0,
-    0, 0, 0, 0, 1e6, 0,
-    0, 0, 0, 0, 0, 1e-9} };
+     0, 1e-3, 1e-9, 0, 0, 0,
+     0, 0, 1e6, 0, 0, 0,
+     0, 0, 0, 1e6, 0, 0,
+     0, 0, 0, 0, 1e6, 0,
+     0, 0, 0, 0, 0, 1e-9} };
 
 void send()
 {
@@ -45,6 +56,12 @@ MyAGV::MyAGV()
     vx = 0.0;
     vy = 0.0;
     vtheta = 0.0;
+
+    // 외부 IMU RPY 초기화
+    have_imu_  = false;
+    imu_roll_  = 0.0;
+    imu_pitch_ = 0.0;
+    imu_yaw_   = 0.0;
 }
 
 MyAGV::~MyAGV()
@@ -59,40 +76,38 @@ bool MyAGV::init()
     sp.set_option(boost::asio::serial_port::parity(boost::asio::serial_port::parity::none));
     sp.set_option(boost::asio::serial_port::stop_bits(boost::asio::serial_port::stop_bits::one));
     sp.set_option(boost::asio::serial_port::character_size(8));
-    Gyroscope_Xdata_Offset = 0.0f; 
-  	Gyroscope_Ydata_Offset = 0.0f; 
-  	Gyroscope_Zdata_Offset = 0.0f;
-    Offest_Count = 0;
+
     ros::Time::init();
- 
-    lastTime = ros::Time::now();
-    pub_imu =  n.advertise<sensor_msgs::Imu>("imu_data", 20);
-    pub_imu_raw =  n.advertise<sensor_msgs::Imu>("imu_raw_data", 20);
-    pub_internal_imu_odom = n.advertise<nav_msgs::Odometry>("internal_imu_odom", 50); // used to be 50
-    pub_external_imu_odom = n.advertise<nav_msgs::Odometry>("external_imu_odom", 50); // used to be 50
+    currentTime = ros::Time::now();
+    lastTime    = ros::Time::now();
+
+    pub   = n.advertise<nav_msgs::Odometry>("odom", 50);
     pub_v = n.advertise<std_msgs::Int8>("Voltage", 1000);
-    restore(); //first restore,abort current err,don't restore
+
+    // === 외부 IMU(RPY) 구독 ===
+    // 토픽 이름은 너가 실제 사용 중인 이름으로 바꿔줘
+    imu_sub_ = n.subscribe("/external_imu_rpy", 50,
+                           &MyAGV::imuCallback, this);
+
+    restore(); // first restore, abort current err, do not restore
     return true;
 }
 
 void MyAGV::restore()
 {
-    // Clear serial port buffer by reading at least 1 byte
-    boost::asio::streambuf clear_buffer; 
+    boost::asio::streambuf clear_buffer;
     boost::asio::read(sp, clear_buffer, boost::asio::transfer_at_least(1));
-    
-    // Pause for 100 milliseconds
+
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    // Motor Stall Recovery
     unsigned char cmd[6] = {0xfe, 0xfe, 0x01, 0x00, 0x01, 0x02};
-    
+
     std::cout << "Sending data: ";
-    for (int i = 0; i < 6; ++i) 
-    {
-        std::cout << std::hex << std::setfill('0') << std::setw(2) << (int)(cmd[i]) << " ";
+    for (int i = 0; i < 6; ++i) {
+        std::cout << std::hex << std::setfill('0') << std::setw(2)
+                  << (int)(cmd[i]) << " ";
     }
     std::cout << std::dec << std::endl;
-    // Write command data to the serial port
+
     boost::asio::write(sp, boost::asio::buffer(cmd));
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     return;
@@ -101,14 +116,14 @@ void MyAGV::restore()
 void MyAGV::restoreRun()
 {
     int res = 0;
-    std::cout << "if you want restore run,pls input 1,then press enter" << std::endl;
-    while(res != 1) {
+    std::cout << "if you want restore run, pls input 1, then press enter" << std::endl;
+    while (res != 1) {
         std::cin >> res;
-        std::cout <<  "press enter" << std::endl;
+        std::cout << "press enter" << std::endl;
         std::cout << res;
     }
     restore();
-    std::cout <<  "restore finished" << std::endl;
+    std::cout << "restore finished" << std::endl;
     return;
 }
 
@@ -145,49 +160,60 @@ bool MyAGV::readSpeed()
         header_found = true;
     }
 
-    ret = boost::asio::read(sp, boost::asio::buffer(buf), er2);  // ready break
-	if ((buf[0] + buf[1] + buf[2] + buf[3]) == buf[4]) {
+    ret = boost::asio::read(sp, boost::asio::buffer(buf), er2);
+    std::cout << std::endl;
+
+    if ((buf[0] + buf[1] + buf[2] + buf[3]) == buf[4]) {
         int wheel_num = 0;
         for (int i = 0; i < 4; ++i) {
             if (buf[i] == 1) {
-                wheel_num = i+1;
-                ROS_ERROR("ERROR %d wheel current > 2000", wheel_num);
+                wheel_num = i + 1;
+                ROS_ERROR("ERROR %d wheel current > 800", wheel_num);
             }
         }
         restoreRun();
         return false;
     }
     if (ret != 27) {
-        ROS_ERROR("Read error %zu",ret);
+        ROS_ERROR("Read error %ld", ret);
         return false;
     }
 
     int index = 0;
-    int check = 0;//ilter time older than imu message buffer
+    int check = 0;
     for (int i = 0; i < 26; ++i)
-        check += buf[index + i];
-    if (check % 256 != buf[index + 26])
-	{
-		ROS_ERROR("error 3! %d -- %d ",check,buf[index+26]);	
-    	return false;
-	}
+        check += buf[i];
+    if (check % 256 != buf[index + 26]) {
+        ROS_ERROR("error 3! %d -- %d", check, buf[index + 26]);
+        return false;
+    }
 
-    vx = (static_cast<double>(buf[index]) - 128.0) * 0.01;
-    vy = (static_cast<double>(buf[index + 1]) - 128.0) * 0.01;
+    vx     = (static_cast<double>(buf[index])     - 128.0) * 0.01;
+    vy     = (static_cast<double>(buf[index + 1]) - 128.0) * 0.01;
     vtheta = (static_cast<double>(buf[index + 2]) - 128.0) * 0.01;
 
-    imu_data.linear_acceleration.x = ((buf[index + 3] + buf[index + 4] * 256 ) - 10000) * 0.001;
-    imu_data.linear_acceleration.y = ((buf[index + 5] + buf[index + 6] * 256 ) - 10000) * 0.001;
-    imu_data.linear_acceleration.z = ((buf[index + 7] + buf[index + 8] * 256 ) - 10000) * 0.001;
+    ax = ((buf[index + 3] +  buf[index + 4] * 256)  - 10000) * 0.001;
+    ay = ((buf[index + 5] +  buf[index + 6] * 256)  - 10000) * 0.001;
+    az = ((buf[index + 7] +  buf[index + 8] * 256)  - 10000) * 0.001;
 
-    imu_data.angular_velocity.x  = ((buf[index + 9] + buf[index + 10] * 256 ) - 10000) * 0.1;
-    imu_data.angular_velocity.y = ((buf[index + 11] + buf[index + 12] * 256 ) - 10000) * 0.1;
-    imu_data.angular_velocity.z = ((buf[index + 13] + buf[index + 14] * 256 ) - 10000) * 0.1;
+    wx = ((buf[index + 9] +  buf[index + 10] * 256) - 10000) * 0.1;
+    wy = ((buf[index + 11] + buf[index + 12] * 256) - 10000) * 0.1;
+    wz = ((buf[index + 13] + buf[index + 14] * 256) - 10000) * 0.1;
 
-    //std::cout << "Received message is: "  << "|" << vx << "," << vy << "," << vtheta << "|"
-                                      //  << imu_data.linear_acceleration.x << "," << imu_data.linear_acceleration.y << "," << imu_data.linear_acceleration.z << "|"
-                                   //  << imu_data.angular_velocity.x << "," << imu_data.angular_velocity.y << "," << imu_data.angular_velocity.z << std::endl;
-    //std::cout << "current pos is: " << x << "," << y << "," << theta << std::endl;
+    currentTime = ros::Time::now();
+
+    double dt = (currentTime - lastTime).toSec();
+
+    // 휠 오도메트리 기반 위치 적분 (theta는 나중에 IMU로 덮어씀)
+    double delta_x  = (vx * cos(theta) - vy * sin(theta)) * dt;
+    double delta_y  = (vx * sin(theta) + vy * cos(theta)) * dt;
+    double delta_th = vtheta * dt;
+
+    x     += delta_x;
+    y     += delta_y;
+    theta += delta_th;   // 기본값은 휠 기반 yaw
+
+    lastTime = currentTime;
 
     return true;
 }
@@ -196,7 +222,7 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
 {
     if (movex == 10 && movey == 10 && rot == 10)
     {
-        unsigned char buf[7] = {0xfe, 0xfe ,0x01 ,0x01 ,0x01 ,0x03};
+        uint8_t buf[7] = {0xfe, 0xfe, 0x01, 0x01, 0x01, 0x03};
         boost::asio::write(sp, boost::asio::buffer(buf));
         unsigned char buf_header[1] = {0};
 
@@ -205,9 +231,9 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
         bool header_found = false;
         time_t now_t = time(NULL);
         while (true) {
-            
+
             ret = boost::asio::read(sp, boost::asio::buffer(buf_header), er2);
-            
+
             if (ret != 1) {
                 continue;
             }
@@ -246,298 +272,98 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
                 break;
             }
         }
-    }else{
-    if (movex > 1.0) movex = 1.0;
-    if (movex < -1.0) movex = -1.0;
-    if (movey > 1.0) movey = 1.0;
-    if (movey < -1.0) movey = -1.0;
-    if (rot > 1.0) rot = 1.0;
-    if (rot < -1.0) rot = -1.0;
+    }
+    else
+    {
+        if (movex > 1.0) movex = 1.0;
+        if (movex < -1.0) movex = -1.0;
+        if (movey > 1.0) movey = 1.0;
+        if (movey < -1.0) movey = -1.0;
+        if (rot > 1.0)   rot   = 1.0;
+        if (rot < -1.0)  rot   = -1.0;
 
-    unsigned char x_send = static_cast<signed char>(movex * 100) + 128;
-    unsigned char y_send = static_cast<signed char>(movey * 100) + 128;
-    unsigned char rot_send = static_cast<signed char>(rot * 100) + 128;
-    unsigned char check = x_send + y_send + rot_send;
+        unsigned char x_send  = static_cast<signed char>(movex * 100) + 128;
+        unsigned char y_send  = static_cast<signed char>(movey * 100) + 128;
+        unsigned char rot_send= static_cast<signed char>(rot   * 100) + 128;
+        unsigned char check   = x_send + y_send + rot_send;
 
-    unsigned char buf[8] = { 0 };
-    buf[0] = header[0];
-    buf[1] = header[1];
-    buf[2] = x_send;
-    buf[3] = y_send;
-    buf[4] = rot_send;
-    buf[5] = check;
-    
-    boost::asio::write(sp, boost::asio::buffer(buf));}
+        char buf[8] = { 0 };
+        buf[0] = header[0];
+        buf[1] = header[1];
+        buf[2] = x_send;
+        buf[3] = y_send;
+        buf[4] = rot_send;
+        buf[5] = check;
+
+        boost::asio::write(sp, boost::asio::buffer(buf));
+    }
 }
 
-float MyAGV::invSqrt(float number)
+bool MyAGV::execute(double linearX, double linearY, double angularZ)
 {
-	volatile long i;
-    volatile float x, y;
-    volatile const float f = 1.5F;
+    // 1) 속도 명령 전송
+    writeSpeed(linearX, linearY, angularZ);
 
-    x = number * 0.5F;
-    y = number;
-    i = * (( long * ) &y);
-    i = 0x5f375a86 - ( i >> 1 );
-    y = * (( float * ) &i);
-    y = y * ( f - ( x * y * y ) );
+    // 2) 상태 읽어서 x, y, theta(휠 기준) 업데이트
+    readSpeed();
 
-	return y;
-}
+    // 3) 외부 IMU RPY가 있다면 yaw로 theta 덮어쓰기
+    double yaw_for_odom = theta;  // 기본값: 휠 기반 yaw
 
-void MyAGV::accelerometerOffset(float gx, float gy, float gz)
-{
-	Gyroscope_Xdata_Offset += gx; 
-  	Gyroscope_Ydata_Offset += gy; 
-  	Gyroscope_Zdata_Offset += gz;
-    // std::cout << "data" << Gyroscope_Xdata_Offset << Gyroscope_Ydata_Offset << Gyroscope_Zdata_Offset << std::endl;
+    if (have_imu_) {
+        // imu_roll_, imu_pitch_도 필요하면 여기서 사용 가능
+        yaw_for_odom = imu_yaw_;  // 외부 IMU yaw 사용 (rad)
+        theta        = imu_yaw_;  // 내부 theta도 외부 yaw와 동기화
+    }
 
-  	if (Offest_Count == OFFSET_COUNT)
-  	{
-  		Gyroscope_Xdata_Offset = Gyroscope_Xdata_Offset / OFFSET_COUNT;
-  		Gyroscope_Ydata_Offset = Gyroscope_Ydata_Offset / OFFSET_COUNT;
-  		Gyroscope_Zdata_Offset = Gyroscope_Zdata_Offset / OFFSET_COUNT;
-  	}
-}
+    geometry_msgs::Quaternion odom_quat =
+        tf::createQuaternionMsgFromYaw(yaw_for_odom);
 
-volatile float twoKp = twoKpDef;											
-volatile float twoKi = twoKiDef;											
-volatile float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;					
-volatile float integralFBx = 0.0f,  integralFBy = 0.0f, integralFBz = 0.0f;	
-
-void MyAGV::MahonyAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, float az)
-{
-	float recipNorm;
-	float halfvx, halfvy, halfvz;
-	float halfex, halfey, halfez;
-	float qa, qb, qc;
-
-	
-	if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
-
-		
-		recipNorm = invSqrt(ax * ax + ay * ay + az * az);
-		ax *= recipNorm;
-		ay *= recipNorm;
-		az *= recipNorm;        
-
-		
-		halfvx = q1 * q3 - q0 * q2;
-		halfvy = q0 * q1 + q2 * q3;
-		halfvz = q0 * q0 - 0.5f + q3 * q3;
-	
-		
-		halfex = (ay * halfvz - az * halfvy);
-		halfey = (az * halfvx - ax * halfvz);
-		halfez = (ax * halfvy - ay * halfvx);
-
-		
-		if(twoKi > 0.0f) {
-			integralFBx += twoKi * halfex * (1.0f / sampleFreq);	
-			integralFBy += twoKi * halfey * (1.0f / sampleFreq);
-			integralFBz += twoKi * halfez * (1.0f / sampleFreq);
-			gx += integralFBx;				
-			gy += integralFBy;
-			gz += integralFBz;
-		}
-		else {
-			integralFBx = 0.0f;				
-			integralFBy = 0.0f;
-			integralFBz = 0.0f;
-		}
-
-	
-		gx += twoKp * halfex;
-		gy += twoKp * halfey;
-		gz += twoKp * halfez;
-	}
-	
-	gx *= (0.5f * (1.0f / sampleFreq));		
-	gy *= (0.5f * (1.0f / sampleFreq));
-	gz *= (0.5f * (1.0f / sampleFreq));
-	qa = q0;
-	qb = q1;
-	qc = q2;
-	q0 += (-qb * gx - qc * gy - q3 * gz);
-	q1 += (qa * gx + qc * gz - q3 * gy);
-	q2 += (qa * gy - qb * gz + q3 * gx);
-	q3 += (qa * gz + qb * gy - qc * gx); 
-	
-	recipNorm = invSqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
-	q0 *= recipNorm;
-	q1 *= recipNorm;
-	q2 *= recipNorm;
-	q3 *= recipNorm;
-
-	imu_data.orientation.w = q0;
-	imu_data.orientation.x = q1;
-	imu_data.orientation.y = q2;
-	imu_data.orientation.z = q3;
-}
-
-void MyAGV::publisherImuSensor()
-{
-	sensor_msgs::Imu ImuSensor;
-
-	ImuSensor.header.stamp = ros::Time::now(); 
-	ImuSensor.header.frame_id = "/imu";
-
-	ImuSensor.orientation.x = 0.0; 
-	ImuSensor.orientation.y = 0.0; 
-	ImuSensor.orientation.z = imu_data.orientation.z;
-	ImuSensor.orientation.w = imu_data.orientation.w;
-
-	ImuSensor.orientation_covariance[0] = 1e6;
-	ImuSensor.orientation_covariance[4] = 1e6;
-	ImuSensor.orientation_covariance[8] = 1e-6;
-
-	ImuSensor.angular_velocity.x = 0.0;		
-	ImuSensor.angular_velocity.y = 0.0;		
-	ImuSensor.angular_velocity.z = imu_data.angular_velocity.z;
-
-	ImuSensor.angular_velocity_covariance[0] = 1e6;
-	ImuSensor.angular_velocity_covariance[4] = 1e6;
-	ImuSensor.angular_velocity_covariance[8] = 1e-6;
-
-	ImuSensor.linear_acceleration.x = 0; 
-	ImuSensor.linear_acceleration.y = 0; 
-	ImuSensor.linear_acceleration.z = 0;  
-
-	pub_imu.publish(ImuSensor); 
-}
-void MyAGV::publisherImuSensorRaw()
-{
-	sensor_msgs::Imu ImuSensorRaw;
-
-	ImuSensorRaw.header.stamp = ros::Time::now(); 
-	ImuSensorRaw.header.frame_id = "/imu_raw";
-
-	ImuSensorRaw.orientation.x = 0.0; 
-	ImuSensorRaw.orientation.y = 0.0; 
-	ImuSensorRaw.orientation.z = 0.0;
-	ImuSensorRaw.orientation.w = 1.0;
-
-	ImuSensorRaw.angular_velocity.x = imu_data.angular_velocity.x;		
-	ImuSensorRaw.angular_velocity.y = imu_data.angular_velocity.y;		
-	ImuSensorRaw.angular_velocity.z = imu_data.angular_velocity.z;
-
-	ImuSensorRaw.linear_acceleration.x = imu_data.linear_acceleration.x; 
-	ImuSensorRaw.linear_acceleration.y = imu_data.linear_acceleration.y; 
-	ImuSensorRaw.linear_acceleration.z = imu_data.linear_acceleration.z;  
-
-	pub_imu.publish(ImuSensorRaw); 
-}
-
-void MyAGV::publisherInternalOdom()
-{   
+    // 4) TF 및 odom 메시지 publish
     geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header.stamp = ros::Time::now();
-    odom_trans.header.frame_id = "internal_imu_odom";
-    odom_trans.child_frame_id = "base_footprint";
+    odom_trans.header.stamp = currentTime;
+    odom_trans.header.frame_id = "odom";
+    odom_trans.child_frame_id  = "base_footprint";
 
-    geometry_msgs::Quaternion odom_quat;
-    double compensated_yaw = theta*1.22;
-    odom_quat = tf::createQuaternionMsgFromYaw(theta); 
-    odom_trans.transform.translation.x = x; 
-    odom_trans.transform.translation.y = y; 
-
+    odom_trans.transform.translation.x = x;
+    odom_trans.transform.translation.y = y;
     odom_trans.transform.translation.z = 0.0;
-    odom_trans.transform.rotation = odom_quat;
+    odom_trans.transform.rotation      = odom_quat;
 
-    //odomBroadcaster.sendTransform(odom_trans);
-    
+    // send the transform
+    odomBroadcaster.sendTransform(odom_trans);
+
+    // publish odometry over ROS
     nav_msgs::Odometry msgl;
-    msgl.header.stamp = ros::Time::now();
-    msgl.header.frame_id = "internal_imu_odom";
+    msgl.header.stamp = currentTime;
+    msgl.header.frame_id = "odom";
 
     msgl.pose.pose.position.x = x;
     msgl.pose.pose.position.y = y;
     msgl.pose.pose.position.z = 0.0;
     msgl.pose.pose.orientation = odom_quat;
-    msgl.pose.covariance = odom_pose_covariance;
+    msgl.pose.covariance       = odom_pose_covariance;
 
-    msgl.child_frame_id = "base_footprint";
-    msgl.twist.twist.linear.x = vx;
-    msgl.twist.twist.linear.y = vy;
-    msgl.twist.twist.angular.z = vtheta;
-    msgl.twist.covariance = odom_twist_covariance;
+    msgl.child_frame_id           = "base_footprint";
+    msgl.twist.twist.linear.x     = vx;
+    msgl.twist.twist.linear.y     = vy;
+    msgl.twist.twist.angular.z    = vtheta;
+    msgl.twist.covariance         = odom_twist_covariance;
 
-    pub_internal_imu_odom.publish(msgl);
-}
-
-void MyAGV::publisherExternalOdom()
-{   
-    geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header.stamp = ros::Time::now();
-    odom_trans.header.frame_id = "external_imu_odom";
-    odom_trans.child_frame_id = "base_footprint";
-
-    geometry_msgs::Quaternion odom_quat;
-    double compensated_yaw = theta*1.22;
-    
-    odom_trans.transform.translation.x = x; 
-    odom_trans.transform.translation.y = y; 
-
-    odom_trans.transform.translation.z = 0.0;
-    odom_trans.transform.rotation = odom_quat;
-
-    //odomBroadcaster.sendTransform(odom_trans);
-    
-    nav_msgs::Odometry msgl;
-    msgl.header.stamp = ros::Time::now();
-    msgl.header.frame_id = "external_imu_odom";
-
-    msgl.pose.pose.position.x = x;
-    msgl.pose.pose.position.y = y;
-    msgl.pose.pose.position.z = 0.0;
-    msgl.pose.pose.orientation = odom_quat;
-    msgl.pose.covariance = odom_pose_covariance;
-
-    msgl.child_frame_id = "base_footprint";
-    msgl.twist.twist.linear.x = vx;
-    msgl.twist.twist.linear.y = vy;
-    msgl.twist.twist.angular.z = vtheta;
-    msgl.twist.covariance = odom_twist_covariance;
-
-    pub_external_imu_odom.publish(msgl);
-}
-
-void MyAGV::execute(double linearX, double linearY, double angularZ)
-{   
-    currentTime = ros::Time::now();    
-    double dt = (currentTime - lastTime).toSec();
-    sampleFreq = 1.0f/dt;
-    if (true ==  readSpeed()) 
-    {    
-        double delta_x = (vx * cos(theta) - vy * sin(theta)) * dt;
-        double delta_y = (vx * sin(theta) + vy * cos(theta)) * dt;
-        double delta_th = vtheta * dt;
-
-        x += delta_x;
-        y += delta_y;
-        theta += delta_th;
-        if (Offest_Count < OFFSET_COUNT)
-        {
-            Offest_Count++;
-            accelerometerOffset(imu_data.angular_velocity.x, imu_data.angular_velocity.y, imu_data.angular_velocity.z);
-        }
-        else
-        {
-            Offest_Count = OFFSET_COUNT;
-            // std::cout << " g_offset=" <<Gyroscope_Xdata_Offset <<" "<< Gyroscope_Ydata_Offset <<" "<< Gyroscope_Zdata_Offset << std::endl;
-            // std::cout <<"imu0=" << imu_data.angular_velocity.x  << " "<< imu_data.angular_velocity.y << " "  <<  imu_data.angular_velocity.z   << std::endl;
-            imu_data.angular_velocity.x = imu_data.angular_velocity.x - Gyroscope_Xdata_Offset;
-            imu_data.angular_velocity.y = imu_data.angular_velocity.y - Gyroscope_Ydata_Offset;
-            imu_data.angular_velocity.z = imu_data.angular_velocity.z - Gyroscope_Zdata_Offset;
-            // std::cout <<"imu=" << imu_data.angular_velocity.x  << " "<< imu_data.angular_velocity.y << " "  <<  imu_data.angular_velocity.z   << std::endl;
-            MahonyAHRSupdateIMU(0.0, 0.0, imu_data.angular_velocity.z, 0.0, 0.0, imu_data.linear_acceleration.z);
-            writeSpeed(linearX, linearY, angularZ);
-            publisherInternalOdom();
-            publisherExternalOdom();
-            publisherImuSensor();
-            //publisherImuSensorRaw();
-        }
-    } 
+    pub.publish(msgl);
     lastTime = currentTime;
+
+    return true;
+}
+
+// === 외부 IMU(RPY) 콜백 ===
+void MyAGV::imuCallback(const geometry_msgs::Vector3Stamped::ConstPtr& msg)
+{
+    // 단위가 deg이면 여기서 rad로 변환해줘야 함
+    // 예) imu_roll_ = msg->vector.x * M_PI / 180.0;
+    imu_roll_  = msg->vector.x;  // rad 가정
+    imu_pitch_ = msg->vector.y;
+    imu_yaw_   = msg->vector.z;
+
+    have_imu_ = true;
 }

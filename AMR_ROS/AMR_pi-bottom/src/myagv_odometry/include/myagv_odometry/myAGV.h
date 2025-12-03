@@ -9,11 +9,13 @@
 #include <tf/transform_broadcaster.h>
 #include <boost/asio.hpp>
 #include <sensor_msgs/Imu.h>
-
+#include <geometry_msgs/Vector3Stamped.h>
 
 //#define sampleFreq	20.5f				// sample frequency in Hz
 #define twoKpDef	1.0f				// (2.0f * 0.5f)	// 2 * proportional gain
 #define twoKiDef	0.0f				// (2.0f * 0.0f)	// 2 * integral gain
+#define OFFSET_COUNT 	200
+
 
 #define OFFSET_COUNT 	200
 
@@ -24,13 +26,14 @@ public:
 	~MyAGV();
 	bool init();
 	float invSqrt(float number);
-	void execute(double linearX, double linearY, double angularZ);
-    void MahonyAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, float az);
+	//void execute(double linearX, double linearY, double angularZ);
+	bool execute(double linearX, double linearY, double angularZ);
+	void MahonyAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, float az);
 	void accelerometerOffset(float gx, float gy, float gz);
-	void publisherInternalOdom();
-  void publisherExternalOdom();
+	void publisherOdom();
 	void publisherImuSensor();
 	void publisherImuSensorRaw();
+  void imuCallback(const geometry_msgs::Vector3Stamped::ConstPtr& msg);
 
 private:
 	bool readSpeed();
@@ -55,19 +58,23 @@ private:
 	double wx;
 	double wy;
 	double wz;
-	
-	double roll;
-	double pitch;
-	double yaw;
     
 	float Gyroscope_Xdata_Offset;
 	float Gyroscope_Ydata_Offset;
 	float Gyroscope_Zdata_Offset;
 	float sampleFreq;
 	unsigned short Offest_Count;
-    sensor_msgs::Imu imu_data;
+  
+  bool have_imu_;
+  double imu_roll_;
+  double imu_pitch_;
+  double imu_yaw_;
+  
+//  sensor_msgs::Imu imu_data;
+  sensor_msgs::Imu last_imu_msg_;
+  ros::Subscriber imu_sub_;
 	ros::NodeHandle n;
-	ros::Publisher pub_internal_imu_odom,pub_v,pub_imu,pub,pub_imu_raw, pub_external_imu_odom;
+	ros::Publisher pub_odom,pub_v,pub_imu,pub,pub_imu_raw;
 	tf::TransformBroadcaster odomBroadcaster;
 };
 
