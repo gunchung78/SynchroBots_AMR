@@ -15,11 +15,9 @@ OPC_ENDPOINT = "opc.tcp://172.30.1.61:0630/freeopcua/server/"
 # ServerMethods.init_nodes() 에서 만든 Object 이름: "InterfaceDataNodes"
 OBJECT_NODE_ID = "ns=2;i=1"
 
-# AMR_003 Method 이름: 'amr_mission_state'
-METHOD_BROWSENAME = "2:amr_mission_state"
+# AMR_003 Method 이름: 'read_amr_mission_state'
+METHOD_BROWSENAME = "ns=2;i=5"
 
-# 서버가 상태를 써주는 Read 변수 노드
-READBACK_NODE_ID = "ns=2;i=4"
 
 
 async def send_mission_state(client, status: str):
@@ -31,7 +29,7 @@ async def send_mission_state(client, status: str):
     """
     # 임무 상태 JSON 예시 (원하면 mission_id만 바꿔도 됨)
     mission_state = {
-        "equipment_id": "AMR_03",
+        "object_info": "AMR_03",
         "mission_id": "2",
         "status": status
     }
@@ -51,9 +49,9 @@ async def send_mission_state(client, status: str):
     print("  - ResultMessage:", result_message)
 
     # 서버가 기록한 상태 노드를 읽어 확인
-    readback_node = client.get_node(READBACK_NODE_ID)
-    last_status = await readback_node.read_value()
-    print("  - ReadbackNode :", last_status)
+    # readback_node = client.get_node(READBACK_NODE_ID)
+    # last_status = await readback_node.read_value()
+    # print("  - ReadbackNode :", last_status)
 
 
 async def main():
