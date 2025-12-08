@@ -7,5 +7,12 @@
     <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
 
     <include file="$(find ydlidar_ros_driver)/launch/X2.launch" />
+    
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <rosparam file="$(find myagv_navigation)/param/amcl.yaml" command="load" />
+  	<param name="initial_pose_x" value="0.00"/>
+  	<param name="initial_pose_y" value="0.00"/>
+  	<param name="initial_pose_a" value="-0.1 "/>
+  </node>      
 
 </launch>

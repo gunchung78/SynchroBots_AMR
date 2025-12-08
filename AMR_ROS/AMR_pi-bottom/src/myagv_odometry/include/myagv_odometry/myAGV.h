@@ -70,6 +70,7 @@ private:
   double imu_pitch_;
   double imu_yaw_;
   
+  
 //  sensor_msgs::Imu imu_data;
   sensor_msgs::Imu last_imu_msg_;
   ros::Subscriber imu_sub_;
