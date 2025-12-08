@@ -1,7 +1,7 @@
 <launch>
 
     
- <!--arg name="map_file" default="$(find myagv_navigation)/map/myagv.yaml"/-->
+ <!--arg name="map_file" default="$(find myagv_navigation)/map/map.yaml"/-->
  <!--node name="map_server_for_test" pkg="map_server" type="map_server" args="$(arg map_file)"-->
  <!--/node-->
 

@@ -1,10 +1,14 @@
 <?xml version="1.0"?>
 <launch>
-
+  <node pkg="amr_imu_pkg"
+    type="imu_publisher.py"
+    name="imu_publisher"
+    output="screen" />
+  
   <!--node pkg="tf2_ros" type="static_transform_publisher" name="static_transform_publisher" args="0 0 0 0 0 0 base_footprint fixed_base_footprint 100" /-->
 
- <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser_link" args="0.065 0.0 0.08 3.14159265 0.0 0.0 base_footprint laser_frame 10" />
- <node pkg="tf" type="static_transform_publisher" name="base_link_to_imu_link" args="-0.015 0.0 0.0 0.0 0.0 0.0 base_footprint imu_raw 10" /> 
+ <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser_link" args="0.065 0.0 0.08 3.14159265 0.0 0.0 /base_footprint /laser_frame 10" />
+    <node pkg="tf" type="static_transform_publisher" name="base_link_to_imu_link" args="-0.015 0.0 0.0 0.0 0.0 0.0 /base_footprint /imu_raw 10" /> 
     
 <!--<node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf">-->
 <!--      <param name="output_frame" value="odom"/>-->
@@ -31,9 +35,9 @@
 
   <node pkg="amcl" type="amcl" name="amcl" output="screen">
     <rosparam file="$(find myagv_navigation)/param/amcl.yaml" command="load" />
-    <param name="initial_pose_x"            value="-0.818"/>
-    <param name="initial_pose_y"            value="-0.066"/>
-    <param name="initial_pose_a"            value="-0.103"/>
+  	<param name="initial_pose_x" value="-0.6860417127609253"/>
+  	<param name="initial_pose_y" value="-0.734063446521759"/>
+  	<param name="initial_pose_a" value="0.0"/>
   </node>      
 
 
@@ -48,10 +52,11 @@
 
     <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
     <param name="planner_frequency" value="1.0"/>
-     <param name="planner_patience" value="2.0"/>
+    <param name="planner_patience" value="2.0"/>
 
-    <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
-    <param name="controller_frequency" value="10.0"/> <!-- 5 -->
+    <param name="base_local_planner" value="base_local_planner/TrajectoryPlannerROS"/>
+    <!--<param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>-->
+    <param name="controller_frequency" value="10.0"/> 
     <param name="controller_patience" value="3.0"/>
     <param name="clearing_rotation_allowed" value="true"/>
 
