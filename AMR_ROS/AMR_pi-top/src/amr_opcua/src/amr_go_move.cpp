@@ -1,0 +1,436 @@
+#include <ros/ros.h>
+#include <std_msgs/String.h>
+
+#include <move_base_msgs/MoveBaseAction.h>
+#include <actionlib/client/simple_action_client.h>
+
+#include <tf/tf.h>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <cmath>
+
+typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
+
+class AmrGoMove
+{
+public:
+  AmrGoMove()
+    : ac_("move_base", true),
+      last_move_command_(""),
+      last_positions_command_("")
+  {
+    ros::NodeHandle private_nh("~");
+
+    // Parameters for go_move (logical destinations)
+    private_nh.param("pick_up_zone_x",       pick_up_zone_x_,       1.0);
+    private_nh.param("pick_up_zone_y",       pick_up_zone_y_,       0.0);
+    private_nh.param("pick_up_zone_yaw_deg", pick_up_zone_yaw_deg_, 0.0);
+
+    private_nh.param("go_home_x",            go_home_x_,       1.0);
+    private_nh.param("go_home_y",            go_home_y_,       0.0);
+    private_nh.param("go_home_yaw_deg",      go_home_yaw_deg_, 0.0);
+
+    // Parameters for go_positions (object-related positions)
+    private_nh.param("esp32_x",              esp32_x_,       2.0);
+    private_nh.param("esp32_y",              esp32_y_,       1.0);
+    private_nh.param("esp32_yaw_deg",        esp32_yaw_deg_, 0.0);
+
+    private_nh.param("motordriver_x",        motordriver_x_,       2.0);
+    private_nh.param("motordriver_y",        motordriver_y_,       1.0);
+    private_nh.param("motordriver_yaw_deg",  motordriver_yaw_deg_, 0.0);
+
+    private_nh.param("powersuplpy_x",        powersuplpy_x_,       2.0);
+    private_nh.param("powersuplpy_y",        powersuplpy_y_,       1.0);
+    private_nh.param("powersuplpy_yaw_deg",  powersuplpy_yaw_deg_, 0.0);
+
+    // Subscribe OPC UA command topics
+    sub_move_ = nh_.subscribe("/amr/opcua/go_move", 10,
+                              &AmrGoMove::opcuaMoveCallback, this);
+
+    sub_positions_ = nh_.subscribe("/amr/opcua/go_positions", 10,
+                                   &AmrGoMove::opcuaPositionsCallback, this);
+
+    // Publisher for mission state (write_opcua_node.py will subscribe this)
+    mission_pub_ = nh_.advertise<std_msgs::String>("amr_mission_state", 10);
+
+    ROS_INFO("Waiting for move_base action server...");
+    ac_.waitForServer();
+    ROS_INFO("Connected to move_base action server.");
+  }
+
+private:
+  // Helper: trim spaces and tabs from both ends of a string.
+  static std::string trim(const std::string& s)
+  {
+    std::size_t start = 0;
+    while (start < s.size() &&
+           (s[start] == ' ' || s[start] == '\t' ||
+            s[start] == '\n' || s[start] == '\r'))
+    {
+      ++start;
+    }
+
+    if (start >= s.size())
+    {
+      return std::string();
+    }
+
+    std::size_t end = s.size();
+    while (end > start &&
+           (s[end - 1] == ' ' || s[end - 1] == '\t' ||
+            s[end - 1] == '\n' || s[end - 1] == '\r'))
+    {
+      --end;
+    }
+
+    return s.substr(start, end - start);
+  }
+
+  // Helper: parse move_command from simple JSON string.
+  // Expected pattern:
+  // { "move_command" : "go_home" }
+  // or
+  // { "move_command" : "pick_up_zone" }
+  std::string parseMoveCommand(const std::string& json_str)
+  {
+    const std::string key = "\"move_command\"";
+    std::size_t key_pos = json_str.find(key);
+    if (key_pos == std::string::npos)
+    {
+      return std::string();
+    }
+
+    std::size_t colon_pos = json_str.find(':', key_pos + key.size());
+    if (colon_pos == std::string::npos)
+    {
+      return std::string();
+    }
+
+    // Find first quote after colon
+    std::size_t first_quote = json_str.find('"', colon_pos);
+    if (first_quote == std::string::npos)
+    {
+      return std::string();
+    }
+    // Find second quote
+    std::size_t second_quote = json_str.find('"', first_quote + 1);
+    if (second_quote == std::string::npos)
+    {
+      return std::string();
+    }
+
+    std::string value = json_str.substr(first_quote + 1,
+                                        second_quote - first_quote - 1);
+    return trim(value);
+  }
+
+  // Helper: parse object_info list from simple JSON string.
+  // Example payload:
+  // { "object_info" : ["esp32","motordriver","powersuplpy"] }
+  //
+  // This function extracts the part between '[' and ']', splits by comma,
+  // trims spaces, and removes double quotes.
+  std::vector<std::string> parseObjectInfoList(const std::string& json_str)
+  {
+    std::vector<std::string> result;
+
+    std::size_t start = json_str.find('[');
+    std::size_t end   = std::string::npos;
+    if (start != std::string::npos)
+    {
+      end = json_str.find(']', start);
+    }
+
+    if (start == std::string::npos ||
+        end == std::string::npos ||
+        end <= start + 1)
+    {
+      ROS_WARN("[amr_go_move] Failed to parse object_info list (no [..] found).");
+      return result;
+    }
+
+    std::string inside = json_str.substr(start + 1, end - start - 1);
+    std::stringstream ss(inside);
+    std::string item;
+
+    while (std::getline(ss, item, ','))
+    {
+      std::string token = trim(item);
+
+      // Remove double quotes if present
+      if (!token.empty() &&
+          token.front() == '"' &&
+          token.back() == '"' &&
+          token.size() >= 2)
+      {
+        token = token.substr(1, token.size() - 2);
+      }
+
+      token = trim(token);
+      if (!token.empty())
+      {
+        result.push_back(token);
+      }
+    }
+
+    return result;
+  }
+
+  // Common helper function to send a navigation goal to move_base.
+  // - x, y: target position in map frame
+  // - yaw_deg: yaw angle in degrees
+  // - target_name: name used only for logging
+  // - mission_state: string to publish on amr_mission_state when goal succeeds;
+  //                  if empty, nothing will be published.
+  void sendGoal(double x, double y, double yaw_deg,
+                const std::string& target_name,
+                const std::string& mission_state)
+  {
+    double yaw_rad = yaw_deg * M_PI / 180.0;
+
+    tf::Quaternion q;
+    q.setRPY(0.0, 0.0, yaw_rad);
+
+    move_base_msgs::MoveBaseGoal goal;
+    goal.target_pose.header.frame_id = "map";
+    goal.target_pose.header.stamp = ros::Time::now();
+
+    goal.target_pose.pose.position.x = x;
+    goal.target_pose.pose.position.y = y;
+    goal.target_pose.pose.position.z = 0.0;
+
+    goal.target_pose.pose.orientation.x = q.x();
+    goal.target_pose.pose.orientation.y = q.y();
+    goal.target_pose.pose.orientation.z = q.z();
+    goal.target_pose.pose.orientation.w = q.w();
+
+    ROS_INFO("[amr_go_move] Sending %s goal: x=%.3f, y=%.3f, yaw=%.3f deg",
+             target_name.c_str(), x, y, yaw_deg);
+
+    ac_.sendGoal(goal);
+
+    bool finished_before_timeout = ac_.waitForResult(ros::Duration(60.0));
+
+    if (finished_before_timeout &&
+        ac_.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+    {
+      ROS_INFO("[amr_go_move] Robot arrived at %s target.", target_name.c_str());
+
+      if (!mission_state.empty())
+      {
+        std_msgs::String msg;
+        msg.data = mission_state;
+        mission_pub_.publish(msg);
+        ROS_INFO("[amr_go_move] Published amr_mission_state = '%s'",
+                 mission_state.c_str());
+      }
+    }
+    else
+    {
+      ROS_WARN("[amr_go_move] Failed to reach %s target. State: %s",
+               target_name.c_str(),
+               ac_.getState().toString().c_str());
+    }
+  }
+
+  // Helper: send goal based on object name.
+  // Returns true if the object name is known and a goal was sent.
+  bool sendObjectGoalByName(const std::string& name)
+  {
+    if (name == "esp32")
+    {
+      ROS_INFO("[amr_go_move] Detected object_info: esp32");
+      sendGoal(esp32_x_, esp32_y_, esp32_yaw_deg_, "esp32", "");
+      return true;
+    }
+    else if (name == "motordriver")
+    {
+      ROS_INFO("[amr_go_move] Detected object_info: motordriver");
+      sendGoal(motordriver_x_, motordriver_y_, motordriver_yaw_deg_, "motordriver", "");
+      return true;
+    }
+    else if (name == "powersuplpy")
+    {
+      // Note: parameter and object name are spelled "powersuplpy" (not "powersupply").
+      ROS_INFO("[amr_go_move] Detected object_info: powersuplpy");
+      sendGoal(powersuplpy_x_, powersuplpy_y_, powersuplpy_yaw_deg_, "powersuplpy", "");
+      return true;
+    }
+    else
+    {
+      ROS_WARN("[amr_go_move] Unknown object_info: %s", name.c_str());
+      return false;
+    }
+  }
+
+  // Callback for /amr/opcua/go_move:
+  // Can receive:
+  // - "Ready"
+  // - { "move_command" : "pick_up_zone" }
+  // - { "move_command" : "go_home" }
+  // Also supports simple substring fallback (for older payloads).
+  void opcuaMoveCallback(const std_msgs::String::ConstPtr& msg)
+  {
+    const std::string& data = msg->data;
+    ROS_INFO_STREAM("[amr_go_move] Received /amr/opcua/go_move: " << data);
+
+    if (data == "Ready")
+    {
+      ROS_INFO("[amr_go_move] State: Ready. No navigation command.");
+      return;
+    }
+
+    if (data == last_move_command_)
+    {
+      ROS_INFO("[amr_go_move] Same move command as last processed. Ignoring.");
+      return;
+    }
+
+    // Try to parse JSON-style move_command first
+    std::string cmd = parseMoveCommand(data);
+    std::string effective_cmd;
+
+    if (!cmd.empty())
+    {
+      effective_cmd = cmd;
+    }
+    else
+    {
+      // Fallback: detect by substring for backward compatibility
+      if (data.find("pick_up_zone") != std::string::npos)
+      {
+        effective_cmd = "pick_up_zone";
+      }
+      else if (data.find("go_home") != std::string::npos)
+      {
+        effective_cmd = "go_home";
+      }
+    }
+
+    if (effective_cmd.empty())
+    {
+      ROS_WARN("[amr_go_move] Unknown move_command in payload. No action.");
+      return;
+    }
+
+    // Save last command (raw payload) after successful parsing
+    last_move_command_ = data;
+
+    if (effective_cmd == "pick_up_zone")
+    {
+      ROS_INFO("[amr_go_move] Detected move_command: pick_up_zone");
+      sendPickUpZoneGoal();
+    }
+    else if (effective_cmd == "go_home")
+    {
+      ROS_INFO("[amr_go_move] Detected move_command: go_home");
+      sendGoHomeGoal();
+    }
+    else
+    {
+      ROS_WARN("[amr_go_move] move_command '%s' is not supported.", effective_cmd.c_str());
+    }
+  }
+
+  // Callback for /amr/opcua/go_positions:
+  // Expects payload like:
+  // { "object_info" : ["esp32","motordriver","powersuplpy"] }
+  // Goals will be sent to move_base in the given order.
+  void opcuaPositionsCallback(const std_msgs::String::ConstPtr& msg)
+  {
+    const std::string& data = msg->data;
+    ROS_INFO_STREAM("[amr_go_move] Received /amr/opcua/go_positions: " << data);
+
+    if (data == "Ready")
+    {
+      ROS_INFO("[amr_go_move] State: Ready. No navigation command.");
+      return;
+    }
+
+    if (data == last_positions_command_)
+    {
+      ROS_INFO("[amr_go_move] Same positions command as last processed. Ignoring.");
+      return;
+    }
+
+    std::vector<std::string> object_list = parseObjectInfoList(data);
+    if (object_list.empty())
+    {
+      ROS_WARN("[amr_go_move] object_info list is empty or could not be parsed.");
+      return;
+    }
+
+    // Save last command after successful parsing
+    last_positions_command_ = data;
+
+    ROS_INFO("[amr_go_move] Parsed %zu object(s) from object_info list.", object_list.size());
+
+    // Send goals to move_base in the same order as in the list.
+    for (std::size_t i = 0; i < object_list.size(); ++i)
+    {
+      const std::string& name = object_list[i];
+      ROS_INFO("[amr_go_move] Processing object_info[%zu] = %s", i, name.c_str());
+      sendObjectGoalByName(name);
+    }
+  }
+
+  // Wrapper to send pick_up_zone goal using the common helper.
+  void sendPickUpZoneGoal()
+  {
+    sendGoal(pick_up_zone_x_,
+             pick_up_zone_y_,
+             pick_up_zone_yaw_deg_,
+             "pick_up_zone",
+             "PICK");
+  }
+
+  // Wrapper to send go_home goal using the common helper.
+  void sendGoHomeGoal()
+  {
+    // You can change "HOME" to any mission_state string you want.
+    sendGoal(go_home_x_,
+             go_home_y_,
+             go_home_yaw_deg_,
+             "go_home",
+             "HOME");
+  }
+
+  ros::NodeHandle nh_;
+  ros::Subscriber sub_move_;
+  ros::Subscriber sub_positions_;
+  MoveBaseClient ac_;
+
+  ros::Publisher mission_pub_;
+
+  std::string last_move_command_;
+  std::string last_positions_command_;
+
+  double pick_up_zone_x_;
+  double pick_up_zone_y_;
+  double pick_up_zone_yaw_deg_;
+
+  double go_home_x_;
+  double go_home_y_;
+  double go_home_yaw_deg_;
+
+  double esp32_x_;
+  double esp32_y_;
+  double esp32_yaw_deg_;
+
+  double motordriver_x_;
+  double motordriver_y_;
+  double motordriver_yaw_deg_;
+
+  double powersuplpy_x_;
+  double powersuplpy_y_;
+  double powersuplpy_yaw_deg_;
+};
+
+int main(int argc, char** argv)
+{
+  ros::init(argc, argv, "amr_go_move");
+  AmrGoMove node;
+  ros::spin();
+  return 0;
+}

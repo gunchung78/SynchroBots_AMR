@@ -1,0 +1,53 @@
+<launch>
+
+  <!-- AMR go_move node (C++: amr_go_move.cpp) -->
+  <!-- NOTE: If your executable name is different (e.g. amr_go_move),
+       change the 'type' field accordingly. -->
+  <node pkg="amr_opcua"
+        type="amr_go_move_node"
+        name="amr_go_move"
+        output="screen">
+
+    <!-- go_home pose (example values, change to your map pose) -->
+    <param name="go_home_x"
+           value="-0.7507189512252808" />
+    <param name="go_home_y"
+           value="0.510118305683136" />
+    <param name="go_home_yaw_deg"
+           value="0.0" />
+
+    <!-- pick_up_zone pose -->
+    <param name="pick_up_zone_x"
+           value="-0.028955131769180298" />
+    <param name="pick_up_zone_y"
+           value="0.5189433097839355" />
+    <param name="pick_up_zone_yaw_deg"
+           value="0.0" />
+
+    <!-- esp32 pose -->
+    <param name="esp32_x"
+           value="-0.4634603261947632" />
+    <param name="esp32_y"
+           value="1.5847265720367432" />
+    <param name="esp32_yaw_deg"
+           value="90.0" />
+
+    <!-- motordriver pose (example values) -->
+    <param name="motordriver_x"
+           value="2.104982852935791" />
+    <param name="motordriver_y"
+           value="1.6602497100830078" />
+    <param name="motordriver_yaw_deg"
+           value="90.0" />
+
+    <!-- powersuplpy pose (example values) -->
+    <param name="powersuplpy_x"
+           value="3.8870227336883545" />
+    <param name="powersuplpy_y"
+           value="0.6789782643318176" />
+    <param name="powersuplpy_yaw_deg"
+           value="0.0" />
+
+  </node>
+
+</launch>
