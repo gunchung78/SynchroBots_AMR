@@ -12,7 +12,7 @@ from asyncua import Client
 DEFAULT_OPCUA_URL = "opc.tcp://172.30.1.61:0630/freeopcua/server/"
 
 OBJECT_NODE_ID = "ns=2;i=1"
-METHOD_NODE_ID = "ns=2;i=17"
+METHOD_NODE_ID = "ns=2;s=write_amr_mission_state"
 
 
 async def send_mission_state_once(status: str):

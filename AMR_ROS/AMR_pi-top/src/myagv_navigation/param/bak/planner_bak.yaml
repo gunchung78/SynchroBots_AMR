@@ -4,6 +4,18 @@ recovery_behaviour_enabled: true
 NavfnROS:
   allow_unknown: true # Specifies whether or not to allow navfn to create plans that traverse unknown space.
   default_tolerance: 0.1 # A tolerance on the goal point for the planner.
+  
+GlobalPlanner:
+  allow_unknown: true        # Whether to allow planning through unknown space
+  use_dijkstra: true         # Choose Dijkstra (true) / A* (false)
+  use_quadratic: true        # Smooth cost calculation
+  use_grid_path: false       # Grid-aligned (right-angled) path vs smoother path
+  old_navfn_behavior: false  # Use legacy Navfn behavior or not
+
+  # Recommended values based on the Navigation Tuning Guide
+  cost_factor: 0.55          # How strongly to scale/spread costmap costs
+  neutral_cost: 66           # Baseline cost offset
+  lethal_cost: 253           # Lethal obstacle cost value
 
 TrajectoryPlannerROS:
   # Robot Configuration Parameters
@@ -11,14 +23,14 @@ TrajectoryPlannerROS:
   acc_lim_theta: 0.5 #2
 
   max_vel_x: 0.17
-  min_vel_x: 0.0
+  min_vel_x: -0.17 # 0
 
   max_vel_theta: 0.03 #0.5
   min_vel_theta: -0.03 #-0.5
-  min_in_place_vel_theta: 0.6
+  min_in_place_vel_theta: 0.6 #0.6 0.5281
 
   holonomic_robot:  false
-  escape_vel: -0.0
+  escape_vel: -0.12 # 0
 
   # Goal Tolerance Parameters
   yaw_goal_tolerance: 0.37
@@ -78,7 +90,7 @@ DWAPlannerROS:
   latch_xy_goal_tolerance: false
 
   # # Forward Simulation Parameters
-  sim_time: 2.0
+  sim_time: 1.4 # 11-15 2.0
   sim_granularity: 0.02
   vx_samples: 6
   vy_samples: 2
@@ -86,9 +98,9 @@ DWAPlannerROS:
   penalize_negative_x: true
 
   # # Trajectory scoring parameters
-  path_distance_bias: 32.0 # The weighting for how much the controller should stay close to the path it was given
-  goal_distance_bias: 24.0 # The weighting for how much the controller should attempt to reach its local goal, also controls speed
-  occdist_scale: 0.01 # The weighting for how much the controller should attempt to avoid obstacles
+  path_distance_bias: 24.0 # The weighting for how much the controller should stay close to the path it was given 				32.0 11-15
+  goal_distance_bias: 18.0 # The weighting for how much the controller should attempt to reach its local goal, also controls speed	24.0 11-15
+  occdist_scale: 0.2 # The weighting for how much the controller should attempt to avoid obstacles						0.2  11-15
   forward_point_distance: 0.325 # The distance from the center point of the robot to place an additional scoring point, in meters
   stop_time_buffer: 0.2  # The amount of time that the robot must stThe absolute value of the veolicty at which to start scaling the robot's footprint, in m/sop before a collision in order for a trajectory to be considered valid in seconds
   scaling_speed: 0.25 # The absolute value of the veolicty at which to start scaling the robot's footprint, in m/s

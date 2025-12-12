@@ -1,6 +1,22 @@
 controller_frequency: 5.0
 recovery_behaviour_enabled: true
 
+# move_base recovery behavior 
+recovery_behaviors:
+  - name: clear_costmap
+    type: clear_costmap_recovery/ClearCostmapRecovery
+  - name: move_slow_and_clear
+    type: move_slow_and_clear/MoveSlowAndClear
+  - name: rotate_recovery
+    type: rotate_recovery/RotateRecovery
+
+move_slow_and_clear:
+  clearing_distance: 0.5        # Radius around the robot to clear (m)
+  limited_trans_speed: 0.15     # Max linear speed in this mode (m/s)
+  limited_rot_speed: 0.3        # Max angular speed in this mode (rad/s)
+  limited_distance: 0.3         # Distance to move before releasing limits (m)
+  planner_namespace: "DWAPlannerROS"
+  
 NavfnROS:
   allow_unknown: true # Specifies whether or not to allow navfn to create plans that traverse unknown space.
   default_tolerance: 0.1 # A tolerance on the goal point for the planner.
@@ -69,28 +85,25 @@ DWAPlannerROS:
   # Robot configuration parameters  
   acc_lim_x: 2.5
   acc_lim_y: 0
-  acc_lim_th: 3.2
+  acc_lim_th: 2.5
 
-  max_vel_x: 0.5
-  min_vel_x: 0.15
+  max_vel_x: 0.4
+  min_vel_x: -0.05
   max_vel_y: 0
   min_vel_y: 0
 
-  max_rot_vel: 1.2
-  min_rot_vel: 0.1
-
-  max_vel_trans: 0.5
+  max_vel_trans: 0.4
   min_vel_trans: 0.05
   max_vel_theta: 1.0
   min_vel_theta: 0.15
 
   # Goal Tolerance Parameters
-  yaw_goal_tolerance: 0.15
-  xy_goal_tolerance: 0.15
-  latch_xy_goal_tolerance: false
+  yaw_goal_tolerance: 0.07
+  xy_goal_tolerance: 0.05
+  latch_xy_goal_tolerance: true
 
   # # Forward Simulation Parameters
-  sim_time: 2.5 # 11-15 2.0
+  sim_time: 2.0 # 11-15 2.0
   sim_granularity: 0.02
   vx_samples: 10
   vy_samples: 0
@@ -100,7 +113,7 @@ DWAPlannerROS:
   # # Trajectory scoring parameters
   path_distance_bias: 28.0 # The weighting for how much the controller should stay close to the path it was given 				32.0 11-15
   goal_distance_bias: 18.0 # The weighting for how much the controller should attempt to reach its local goal, also controls speed	24.0 11-15
-  occdist_scale: 0.06 # The weighting for how much the controller should attempt to avoid obstacles						0.2  11-15
+  occdist_scale: 0.02 # The weighting for how much the controller should attempt to avoid obstacles						0.2  11-15
   forward_point_distance: 0.325 # The distance from the center point of the robot to place an additional scoring point, in meters
   stop_time_buffer: 0.25  # The amount of time that the robot must stThe absolute value of the veolicty at which to start scaling the robot's footprint, in m/sop before a collision in order for a trajectory to be considered valid in seconds
   scaling_speed: 0.25 # The absolute value of the veolicty at which to start scaling the robot's footprint, in m/s

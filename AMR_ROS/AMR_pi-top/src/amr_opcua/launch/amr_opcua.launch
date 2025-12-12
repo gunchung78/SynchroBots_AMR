@@ -44,25 +44,25 @@
 
     <!-- esp32 pose -->
     <param name="esp32_x"
-           value="-0.4634603261947632" />
+           value="-0.18510204553604126" />
     <param name="esp32_y"
-           value="1.5847265720367432" />
+           value="2.7689642906188965" />
     <param name="esp32_yaw_deg"
            value="90.0" />
 
     <!-- motordriver pose (example values) -->
     <param name="motordriver_x"
-           value="2.104982852935791" />
+           value="2.166576623916626" />
     <param name="motordriver_y"
-           value="1.6602497100830078" />
+           value="2.8864500522613525" />
     <param name="motordriver_yaw_deg"
            value="90.0" />
 
     <!-- powersuplpy pose (example values) -->
     <param name="powersuplpy_x"
-           value="3.8870227336883545" />
+           value="4.279068946838379" />
     <param name="powersuplpy_y"
-           value="0.6789782643318176" />
+           value="2.5080320835113525" />
     <param name="powersuplpy_yaw_deg"
            value="0.0" />
 

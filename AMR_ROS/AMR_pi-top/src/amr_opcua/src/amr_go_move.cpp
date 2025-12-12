@@ -9,6 +9,7 @@
 #include <vector>
 #include <sstream>
 #include <cmath>
+#include <std_srvs/SetBool.h>
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
@@ -53,6 +54,9 @@ public:
 
     // Publisher for mission state (write_opcua_node.py will subscribe this)
     mission_pub_ = nh_.advertise<std_msgs::String>("amr_mission_state", 10);
+
+    // ¡Ú /go_aruco 
+    go_aruco_client_ = nh_.serviceClient<std_srvs::SetBool>("/go_aruco");
 
     ROS_INFO("Waiting for move_base action server...");
     ac_.waitForServer();
@@ -234,27 +238,26 @@ private:
     }
   }
 
-  // Helper: send goal based on object name.
-  // Returns true if the object name is known and a goal was sent.
+  // Expects payload like:
+  // { "object_info" : ["ESP32","MB102","L298N"] }
   bool sendObjectGoalByName(const std::string& name)
   {
-    if (name == "esp32")
+    if (name == "ESP32")
     {
-      ROS_INFO("[amr_go_move] Detected object_info: esp32");
-      sendGoal(esp32_x_, esp32_y_, esp32_yaw_deg_, "esp32", "");
+      ROS_INFO("[amr_go_move] Detected object_info: ESP32");
+      sendGoal(esp32_x_, esp32_y_, esp32_yaw_deg_, "ESP32", "");
       return true;
     }
-    else if (name == "motordriver")
+    else if (name == "L298N")
     {
-      ROS_INFO("[amr_go_move] Detected object_info: motordriver");
-      sendGoal(motordriver_x_, motordriver_y_, motordriver_yaw_deg_, "motordriver", "");
+      ROS_INFO("[amr_go_move] Detected object_info: L298N");
+      sendGoal(motordriver_x_, motordriver_y_, motordriver_yaw_deg_, "L298N", "");
       return true;
     }
-    else if (name == "powersuplpy")
+    else if (name == "MB102")
     {
-      // Note: parameter and object name are spelled "powersuplpy" (not "powersupply").
-      ROS_INFO("[amr_go_move] Detected object_info: powersuplpy");
-      sendGoal(powersuplpy_x_, powersuplpy_y_, powersuplpy_yaw_deg_, "powersuplpy", "");
+      ROS_INFO("[amr_go_move] Detected object_info: MB102");
+      sendGoal(powersuplpy_x_, powersuplpy_y_, powersuplpy_yaw_deg_, "MB102", "");
       return true;
     }
     else
@@ -320,7 +323,34 @@ private:
     if (effective_cmd == "pick_up_zone")
     {
       ROS_INFO("[amr_go_move] Detected move_command: pick_up_zone");
-      sendPickUpZoneGoal();
+
+
+      std_srvs::SetBool srv;
+      srv.request.data = true;  
+
+      if (go_aruco_client_.call(srv))
+      {
+        if (srv.response.success)
+        {
+          ROS_INFO("[amr_go_move] /go_aruco service call succeeded: %s",
+                   srv.response.message.c_str());
+      
+          std_msgs::String state_msg;
+          state_msg.data = "PICK";
+          mission_pub_.publish(state_msg);
+          ROS_INFO("[amr_go_move] Published amr_mission_state = 'PICK'");
+        }
+        else
+        {
+          ROS_WARN("[amr_go_move] /go_aruco responded but reported failure: %s",
+                   srv.response.message.c_str());
+        }
+      }
+      else
+      {
+        ROS_ERROR("[amr_go_move] Failed to call /go_aruco service.");
+      }
+     
     }
     else if (effective_cmd == "go_home")
     {
@@ -373,6 +403,10 @@ private:
       ROS_INFO("[amr_go_move] Processing object_info[%zu] = %s", i, name.c_str());
       sendObjectGoalByName(name);
     }
+    std_msgs::String state_msg;
+    state_msg.data = "DONE";
+    mission_pub_.publish(state_msg);
+    ROS_INFO("[amr_go_move] Published amr_mission_state = 'DONE'");
   }
 
   // Wrapper to send pick_up_zone goal using the common helper.
@@ -425,6 +459,8 @@ private:
   double powersuplpy_x_;
   double powersuplpy_y_;
   double powersuplpy_yaw_deg_;
+
+  ros::ServiceClient go_aruco_client_;
 };
 
 int main(int argc, char** argv)
