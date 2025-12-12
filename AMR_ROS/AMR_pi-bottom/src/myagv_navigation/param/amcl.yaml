@@ -7,7 +7,7 @@ global_frame_id: "map"
 ## Publish scans from best pose at a max of 10 Hz
 odom_model_type: "diff"
 gui_publish_rate: 10.0
-min_particles: 2000
+min_particles: 3000
 max_particles: 5000
 kld_err: 0.05
 kld_z: 0.99

@@ -57,7 +57,6 @@ MyAGV::MyAGV()
     vy = 0.0;
     vtheta = 0.0;
 
-    // 외부 IMU RPY 초기화
     have_imu_  = false;
     imu_roll_  = 0.0;
     imu_pitch_ = 0.0;
@@ -84,8 +83,6 @@ bool MyAGV::init()
     pub   = n.advertise<nav_msgs::Odometry>("odom", 50);
     pub_v = n.advertise<std_msgs::Int8>("Voltage", 1000);
 
-    // === 외부 IMU(RPY) 구독 ===
-    // 토픽 이름은 너가 실제 사용 중인 이름으로 바꿔줘
     imu_sub_ = n.subscribe("/external_imu_rpy", 50,
                            &MyAGV::imuCallback, this);
 
@@ -204,14 +201,13 @@ bool MyAGV::readSpeed()
 
     double dt = (currentTime - lastTime).toSec();
 
-    // 휠 오도메트리 기반 위치 적분 (theta는 나중에 IMU로 덮어씀)
     double delta_x  = (vx * cos(theta) - vy * sin(theta)) * dt;
     double delta_y  = (vx * sin(theta) + vy * cos(theta)) * dt;
     double delta_th = vtheta * dt;
 
     x     += delta_x;
     y     += delta_y;
-    theta += delta_th;   // 기본값은 휠 기반 yaw
+    theta += delta_th;
 
     lastTime = currentTime;
 
@@ -301,25 +297,20 @@ void MyAGV::writeSpeed(double movex, double movey, double rot)
 
 bool MyAGV::execute(double linearX, double linearY, double angularZ)
 {
-    // 1) 속도 명령 전송
     writeSpeed(linearX, linearY, angularZ);
 
-    // 2) 상태 읽어서 x, y, theta(휠 기준) 업데이트
     readSpeed();
 
-    // 3) 외부 IMU RPY가 있다면 yaw로 theta 덮어쓰기
-    double yaw_for_odom = theta;  // 기본값: 휠 기반 yaw
+    double yaw_for_odom = theta;  
 
     if (have_imu_) {
-        // imu_roll_, imu_pitch_도 필요하면 여기서 사용 가능
-        yaw_for_odom = imu_yaw_;  // 외부 IMU yaw 사용 (rad)
-        theta        = imu_yaw_;  // 내부 theta도 외부 yaw와 동기화
+        yaw_for_odom = imu_yaw_;
+        theta        = imu_yaw_;
     }
 
     geometry_msgs::Quaternion odom_quat =
         tf::createQuaternionMsgFromYaw(yaw_for_odom);
 
-    // 4) TF 및 odom 메시지 publish
     geometry_msgs::TransformStamped odom_trans;
     odom_trans.header.stamp = currentTime;
     odom_trans.header.frame_id = "odom";
@@ -331,7 +322,7 @@ bool MyAGV::execute(double linearX, double linearY, double angularZ)
     odom_trans.transform.rotation      = odom_quat;
 
     // send the transform
-    odomBroadcaster.sendTransform(odom_trans);
+    // odomBroadcaster.sendTransform(odom_trans);
 
     // publish odometry over ROS
     nav_msgs::Odometry msgl;
@@ -356,12 +347,10 @@ bool MyAGV::execute(double linearX, double linearY, double angularZ)
     return true;
 }
 
-// === 외부 IMU(RPY) 콜백 ===
+
 void MyAGV::imuCallback(const geometry_msgs::Vector3Stamped::ConstPtr& msg)
 {
-    // 단위가 deg이면 여기서 rad로 변환해줘야 함
-    // 예) imu_roll_ = msg->vector.x * M_PI / 180.0;
-    imu_roll_  = msg->vector.x;  // rad 가정
+    imu_roll_  = msg->vector.x;
     imu_pitch_ = msg->vector.y;
     imu_yaw_   = msg->vector.z;
 
