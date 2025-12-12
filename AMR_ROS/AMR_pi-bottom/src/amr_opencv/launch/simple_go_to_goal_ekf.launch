@@ -1,0 +1,19 @@
+<launch>
+  <!-- Goal in the odom_combined frame -->
+  <arg name="goal_x" default="1.0"/>
+  <arg name="goal_y" default="0.0"/>
+  <arg name="dist_threshold" default="0.05"/>
+
+  <node pkg="amr_opencv"
+        type="simple_go_to_goal_ekf.py"
+        name="simple_go_to_goal_ekf"
+        output="screen">
+    <param name="goal_x" value="$(arg goal_x)"/>
+    <param name="goal_y" value="$(arg goal_y)"/>
+    <param name="dist_threshold" value="$(arg dist_threshold)"/>
+
+    <param name="forward_speed" value="0.1"/>
+    <param name="cmd_vel_topic" value="/cmd_vel"/>
+    <param name="odom_topic" value="/robot_pose_ekf/odom_combined"/>
+  </node>
+</launch>
