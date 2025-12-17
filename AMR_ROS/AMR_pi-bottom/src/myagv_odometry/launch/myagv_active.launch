@@ -1,6 +1,6 @@
 <launch>
 
-    <node pkg="myagv_odometry" type="myagv_odometry_node" name="myagv_odometry_node" output="screen" />
+    <node pkg="myagv_odometry" type="myagv_odometry_node" name="myagv_odometry_node"/>
     <param name="robot_description" textfile="$(find myagv_urdf)/urdf/myAGV.urdf"/>
 
     <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
@@ -14,10 +14,10 @@
         <param name="initial_pose_y" value="-0.05"/>
         <param name="initial_pose_a" value="0.0 "/>
     </node>
-
+    
     <node pkg="amr_opencv"
-          type="amr_aruco_all_in_one.py"
-          name="amr_aruco_all_in_one"
-          output="screen" />
+        type="amr_aruco_all_in_one.py"
+        name="amr_aruco_all_in_one"
+        output="screen" />
 
 </launch>

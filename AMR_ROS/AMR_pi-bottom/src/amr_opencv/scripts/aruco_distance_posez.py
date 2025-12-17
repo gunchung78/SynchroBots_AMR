@@ -21,7 +21,7 @@ ARUCO_PARAMS = aruco.DetectorParameters()
 ARUCO_DETECTOR = aruco.ArucoDetector(ARUCO_DICT, ARUCO_PARAMS)
 
 DEBUG = False
-MARKER_LENGTH = 0.032  # marker side length in meters
+MARKER_LENGTH = 0.064  # marker side length in meters
 
 cap = cv2.VideoCapture(0)
 font = cv2.FONT_HERSHEY_SIMPLEX

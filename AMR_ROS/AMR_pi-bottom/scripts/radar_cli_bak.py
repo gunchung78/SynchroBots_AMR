@@ -4,7 +4,6 @@
 import os
 import sys
 import time
-import signal
 import subprocess
 
 RADAR_PIN = 20
@@ -49,24 +48,24 @@ def radar_off():
     GPIO.cleanup()
 
 
-def start_roslaunch_in_same_terminal():
-    """
-    Run roslaunch in the SAME terminal (no gnome-terminal).
-    Use a new process group so we can send SIGINT to the whole group.
-    """
-    if os.name != "posix":
-        # Fallback for non-posix (no process group control)
-        cmd = ["bash", "-lc", LAUNCH_CMD]
-        print("[ROS] Starting in same terminal (non-posix fallback):")
-        print("      " + " ".join(cmd))
-        return subprocess.Popen(cmd)
-
-    cmd = ["bash", "-lc", LAUNCH_CMD]
-    print("[ROS] Starting in same terminal:")
+def start_roslaunch_in_terminal():
+    cmd = [
+        "gnome-terminal",
+        "--",
+        "bash",
+        "-lc",
+        LAUNCH_CMD,
+    ]
+    print("[ROS] Starting in new terminal:")
     print("      " + " ".join(cmd))
 
-    # preexec_fn=os.setsid -> new process group
-    proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+    try:
+        proc = subprocess.Popen(cmd)
+    except FileNotFoundError:
+        print("[ERROR] gnome-terminal not found.")
+        print("       Check if GUI environment and gnome-terminal are available.")
+        sys.exit(1)
+
     return proc
 
 
@@ -100,32 +99,9 @@ def main():
         print("==========================================")
 
         radar_on()
-        proc = start_roslaunch_in_same_terminal()
-
-        # Wait here so output stays in this terminal.
-        # Ctrl+C will stop roslaunch and turn radar off.
-        try:
-            ret = proc.wait()
-            print(f"[ROS] roslaunch exited with code: {ret}")
-        except KeyboardInterrupt:
-            print("\n[MAIN] KeyboardInterrupt received. Stopping roslaunch...")
-            if os.name == "posix":
-                try:
-                    os.killpg(proc.pid, signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-            else:
-                try:
-                    proc.send_signal(signal.SIGINT)
-                except Exception:
-                    pass
-            try:
-                proc.wait(timeout=10)
-            except Exception:
-                pass
-        finally:
-            radar_off()
-
+        start_roslaunch_in_terminal()
+        print("[MAIN] Command 'on' executed.")
+        print("       roslaunch is running in a new terminal.")
         sys.exit(0)
 
     elif cmd == "off":
