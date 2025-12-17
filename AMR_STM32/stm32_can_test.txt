@@ -1,0 +1,373 @@
+좋아, 이제 **ESP32로 확인한 CAN 통신을 STM32F407G-DISC1 두 개 + SN65HVD230 두 개**로 그대로 옮겨볼게.
+배선 → CubeMX 설정 → 코드까지 한 번에 갈 수 있게 정리해줄게.
+
+---
+
+## 0. 전체 그림 요약
+
+* 보드: **STM32F407G-DISC1 × 2**
+* 트랜시버: **SN65HVD230 × 2** (3.3V CAN 트랜시버)
+* CAN 핀:
+
+  * **PB8 → CAN1_RX**, **PB9 → CAN1_TX** (AF9) ([Hello world][1])
+* 속도: **500 kbps** (APB1=42MHz 기준, Prescaler=6, BS1=11TQ, BS2=2TQ 조합 예시) ([CSDN][2])
+* 두 보드 모두 같은 코드 쓰고, `NODE_ID`만 1/2로 바꿔서 빌드하면 서로 송수신 확인 가능.
+
+---
+
+## 1. 하드웨어 배선
+
+### 1-1. STM32F407 ↔ SN65HVD230 연결 (각 보드 공통)
+
+SN65HVD230 데이터시트 기준 핀 기능:
+
+* **D (또는 TXD)**: MCU 쪽에서 보내는 데이터 입력 (CAN_TX에 연결)
+* **R (또는 RXD)**: 버스에서 받은 데이터 출력 (CAN_RX에 연결)
+* **VCC**: 3.3V
+* **GND**: GND
+* **CANH / CANL**: 차동 CAN 버스
+* **RS**: GND에 연결하면 High-Speed 모드 (일반적인 모드)
+
+**각 STM32F407 보드에서:**
+
+| SN65HVD230 | STM32F407G-DISC1                             |
+| ---------- | -------------------------------------------- |
+| VCC        | 3.3V 핀 (보드의 3V 라벨)                           |
+| GND        | GND                                          |
+| TXD(D)     | **PB9 (CAN1_TX)**                            |
+| RXD(R)     | **PB8 (CAN1_RX)**                            |
+| CANH       | CAN 버스 CANH 라인                               |
+| CANL       | CAN 버스 CANL 라인                               |
+| RS         | GND (또는 10kΩ 저항으로 GND → 슬로프제어 가능, 일단 GND 직결) |
+
+> PB8/PB9가 CAN1_RX/TX로 사용 가능하고, AF9로 설정해야 한다는 건 ST 문서·예제에서도 동일하게 나오고 있어. ([Hello world][1])
+
+### 1-2. 두 보드 간 CAN 버스
+
+두 SN65HVD230 모듈끼리:
+
+* **CANH ↔ CANH**
+* **CANL ↔ CANL**
+* **GND ↔ GND** (두 STM32 보드 GND도 반드시 서로 공통!)
+
+그리고 **버스 양 끝에만 120Ω 종단저항 2개**:
+
+* 한쪽 끝: CANH–CANL 사이 120Ω
+* 다른쪽 끝: CANH–CANL 사이 120Ω
+  → 전체적으로 CANH–CANL 사이를 저항으로 찍어보면 약 60Ω 정도 나오는 게 정상. (120Ω 2개 병렬) ([CSDN][3])
+
+SN65 모듈에 120Ω 점퍼가 이미 있는 경우:
+
+* **양 끝 노드의 점퍼만 ON**, 가운데 노드는 OFF.
+
+---
+
+## 2. STM32CubeMX / CubeIDE 설정
+
+두 보드 모두 동일하게 설정하고, 나중에 코드에서 `NODE_ID`만 다르게 줄 거야.
+
+### 2-1. 기본 프로젝트 생성
+
+1. **Board Selector**에서 `STM32F407G-DISC1` 선택.
+2. Toolchain: STM32CubeIDE 선택해서 프로젝트 생성.
+
+### 2-2. RCC / 클럭
+
+* 기본 예제처럼 **HSE ON / SYSCLK 168MHz, APB1 = 42MHz**로 설정 (Cube 기본 템플릿 그대로 사용해도 됨)
+
+### 2-3. CAN1 활성화 + GPIO 설정
+
+1. Pinout 탭에서:
+
+   * **CAN1** 활성화 (Mode: **RX/TX**)
+   * CAN1_RX → **PB8**
+   * CAN1_TX → **PB9**
+     (CubeMX가 자동으로 GPIOB, AF9 설정해준다. 이 매핑은 ST 공식 자료에도 있는 표준 조합이야. ([Hello world][1]))
+
+2. GPIO 속성은 기본값 (AF_PP, High speed, Pull-up/Down 없음) 그대로 사용.
+
+### 2-4. CAN1 속도 설정 (500kbps 예시)
+
+Configuration → **CAN1**:
+
+* Prescaler: **6**
+* Mode: **Normal**
+* Sync Jump Width: **1 TQ**
+* Time Seg1: **11 TQ (CAN_BS1_11TQ)**
+* Time Seg2: **2 TQ (CAN_BS2_2TQ)**
+
+APB1=42MHz일 때
+`bitrate = 42MHz / (Presc * (1 + BS1 + BS2)) = 42e6 / (6 * 14) = 500 kbps` ([CSDN][2])
+
+**주의:** 두 STM32 보드 + ESP32까지 모두 같은 속도로 맞춰야 함.
+
+### 2-5. NVIC (선택)
+
+이번 예제는 **폴링 방식**으로 할 거라 인터럽트는 꼭 필요하진 않지만, 나중에 쓸 거 생각하면:
+
+* CAN1_RX0 interrupt **Enable** 해둬도 됨 (코드 예제에서는 사용 X).
+
+### 2-6. 코드 생성
+
+* Project → Generate Code 눌러서 코드 생성.
+
+---
+
+## 3. STM32 코드 예제 (양방향 테스트)
+
+> 컨셉은 ESP32에서 했던 것과 동일:
+> **1초마다 “내 NODE_ID, 카운터” 보내고, 아무 메시지나 들어오면 받아서 확인.**
+
+아래 코드는 **CubeMX가 생성한 `main.c` 기준**으로
+`/* USER CODE BEGIN ... */` 영역에 넣어 쓰는 예제야.
+
+### 3-1. 전역 변수 선언 (main.c 위쪽)
+
+```c
+/* USER CODE BEGIN Includes */
+#include <string.h>
+/* USER CODE END Includes */
+
+/* USER CODE BEGIN PV */
+CAN_HandleTypeDef hcan1;
+
+CAN_TxHeaderTypeDef   TxHeader;
+CAN_RxHeaderTypeDef   RxHeader;
+uint8_t TxData[8];
+uint8_t RxData[8];
+uint32_t TxMailbox;
+
+/* 보드마다 이 값만 1, 2로 다르게 */
+#define NODE_ID 1   // 두 번째 보드는 2로 변경해서 빌드
+
+uint32_t lastTxTick = 0;
+/* USER CODE END PV */
+```
+
+> `hcan1`는 CubeMX가 따로 선언해놨을 수도 있으니, 이미 있다면 중복 선언하지 말고 그대로 사용해도 돼.
+
+### 3-2. CAN 필터 + 시작 함수
+
+```c
+/* USER CODE BEGIN 0 */
+
+void CAN1_Config(void)
+{
+    CAN_FilterTypeDef sFilterConfig;
+
+    // 모든 ID 수신 (마스크 모드, 32bit 전체 0)
+    sFilterConfig.FilterBank = 0;
+    sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    sFilterConfig.FilterIdHigh = 0x0000;
+    sFilterConfig.FilterIdLow = 0x0000;
+    sFilterConfig.FilterMaskIdHigh = 0x0000;
+    sFilterConfig.FilterMaskIdLow = 0x0000;
+    sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+    sFilterConfig.FilterActivation = ENABLE;
+    sFilterConfig.SlaveStartFilterBank = 14;  // F4 듀얼 CAN 구조 대비 값, 그대로 둬도 OK
+
+    if (HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK)
+    {
+        // 에러 처리 (여기서는 멈춤)
+        Error_Handler();
+    }
+
+    // CAN 시작
+    if (HAL_CAN_Start(&hcan1) != HAL_OK)
+    {
+        Error_Handler();
+    }
+}
+
+/* USER CODE END 0 */
+```
+
+### 3-3. `main()` 안에 초기화 + 루프
+
+`main()` 안의 USER CODE 부분만 보여줄게:
+
+```c
+int main(void)
+{
+  /* MCU Configuration--------------------------------------------------------*/
+
+  HAL_Init();
+  SystemClock_Config();
+
+  MX_GPIO_Init();
+  MX_CAN1_Init();   // CubeMX가 생성한 함수
+
+  /* USER CODE BEGIN 2 */
+  CAN1_Config();
+
+  // Tx Header 기본 설정
+  TxHeader.StdId = 0x100 + NODE_ID;   // 노드마다 다른 ID
+  TxHeader.ExtId = 0x01;
+  TxHeader.RTR   = CAN_RTR_DATA;
+  TxHeader.IDE   = CAN_ID_STD;        // 표준 11bit ID
+  TxHeader.DLC   = 2;                 // 데이터 2바이트
+  TxHeader.TransmitGlobalTime = DISABLE;
+
+  lastTxTick = HAL_GetTick();
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    uint32_t now = HAL_GetTick();
+
+    // 1) 1초마다 메시지 송신
+    if ((now - lastTxTick) >= 1000)
+    {
+      lastTxTick = now;
+
+      TxData[0] = NODE_ID;
+      TxData[1] = (uint8_t)(now / 1000);  // 그냥 초 카운터 넣기
+
+      if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox) == HAL_OK)
+      {
+        // 예: 송신 성공 시 LED 토글 (PD12: 녹색 LED)
+        HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_12);
+      }
+      else
+      {
+        // 송신 실패 시 다른 LED 토글 (PD14: 빨간 LED)
+        HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_14);
+      }
+    }
+
+    // 2) 수신 FIFO 확인 (폴링)
+    if (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0)
+    {
+      if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
+      {
+        // 예: 수신 성공 시 파란 LED 토글 (PD15)
+        HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_15);
+
+        // 필요하면 여기서 RxHeader.StdId, RxData[0/1] 값으로
+        // 발신자 NODE_ID, 카운터 등을 확인 가능
+        // ex) RxData[0] = 발신자 NODE_ID, RxData[1] = 카운터
+      }
+    }
+
+    // 너무 바쁘지 않게 약간 쉼
+    HAL_Delay(1);
+    /* USER CODE END WHILE */
+  }
+
+  /* USER CODE END 3 */
+}
+```
+
+> STM32F4DISCOVERY 보드의 LED 핀은 GPIOD 12~15 (녹/오/빨/파)로 되어 있음.
+
+### 3-4. `MX_CAN1_Init()` 예시 (CubeMX 자동 생성 기준)
+
+CubeMX가 생성했겠지만, 참고용으로 한 번 적어줄게.
+(만약 이미 비슷하게 생성돼 있으면 **그대로 두고 필터/Start만 위에서 따로 호출**해도 OK)
+
+```c
+void MX_CAN1_Init(void)
+{
+  hcan1.Instance = CAN1;
+  hcan1.Init.Prescaler = 6;
+  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan1.Init.TimeTriggeredMode = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;
+  hcan1.Init.AutoWakeUp = DISABLE;
+  hcan1.Init.AutoRetransmission = ENABLE;
+  hcan1.Init.ReceiveFifoLocked = DISABLE;
+  hcan1.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+```
+
+### 3-5. GPIO 초기화 (LED, CAN 핀)
+
+`HAL_CAN_MspInit()`는 CubeMX가 자동으로 만들어 줄 텐데, 혹시 안 만들어졌다면 이런 식:
+
+```c
+void HAL_CAN_MspInit(CAN_HandleTypeDef* hcan)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(hcan->Instance==CAN1)
+  {
+    /* CAN1 clock enable */
+    __HAL_RCC_CAN1_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* PB8 -> CAN1_RX, PB9 -> CAN1_TX (AF9) */
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF9_CAN1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  }
+}
+```
+
+LED 쪽은 `MX_GPIO_Init()`에서 이미 설정되어 있을 거라, 따로 손댈 필요는 거의 없을 거야.
+
+---
+
+## 4. 보드별로 어떻게 테스트?
+
+1. **보드 1:**
+
+   * `#define NODE_ID 1`
+   * 빌드 & 플래시.
+
+2. **보드 2:**
+
+   * 같은 프로젝트 복사하거나, 다른 프로젝트 만들어서
+   * `#define NODE_ID 2`
+   * 빌드 & 플래시.
+
+3. 두 보드 전원 ON, CAN 배선 + GND 공통 확인.
+
+4. 기대 동작:
+
+   * 각 보드에서 매초 TX하면서 자기 **녹색 LED(PD12)** 토글.
+   * 상대 방 메시지를 받으면 **파란 LED(PD15)**도 깜빡임.
+   * 만약 TX 실패(버스 문제) 발생 시 빨간 LED(PD14) 토글 로 잡을 수 있음.
+
+여기서까지 잘 되면, 이제
+**ESP32 + STM32F407 + SN65HVD230**를 같은 버스에 동시에 물려도 문제없이 통신될 거야 (속도/종단/배선만 맞으면).
+
+---
+
+## 5. 다음 단계(고급 팁)
+
+* **Interrupt 방식**
+
+  * 폴링 대신, `HAL_CAN_ActivateNotification()` + `HAL_CAN_RxFifo0MsgPendingCallback()`로 인터럽트 기반 RX로 바꾸면 CPU 사용량 줄일 수 있음. ([CSDN][3])
+* **ID 필터링**
+
+  * 지금은 `FilterId/Mask = 0`이라 모든 메시지를 받지만,
+    나중에 `FilterId = (0x100 + 상대 노드 ID) << 5` 식으로 설정하면 원하는 ID만 받도록 최적화 가능.
+* **IMU / 초음파 데이터 실사용**
+
+  * ESP32에서 했던 것처럼, `TxData[0]`에 노드ID, `TxData[1..7]`에 센서값 패킹해서 보내면
+    F407 ↔ SBC ↔ 다른 F407 구조로 바로 확장 가능.
+* **속도/케이블 길이**
+
+  * 나중에 선 길이가 길어지면 500kbps 대신 250kbps 등으로 낮추는 것도 고려 (Prescaler/Segment만 조정).
+
+---
+
+지금 단계에서 막힐 수 있는 부분은 거의 **클럭 설정 / PB8, PB9 AF 설정 / GND 공통 / SN65 전원(3.3V)** 이 네 가지야.
+위 코드까지 넣어보고, LED가 어떻게 동작하는지 알려주면
+다음 단계(실제 IMU, HC-SR04 CAN 프레임 설계)까지 같이 이어서 짜보자.
+
+[1]: https://921002.tistory.com/category/Project/Open407V-C?utm_source=chatgpt.com "'Project/Open407V-C' 카테고리의 글 목록"
+[2]: https://blog.csdn.net/weixin_31688273/article/details/154714623?utm_source=chatgpt.com "STM32F4 CAN波特率设置匹配不同网络"
+[3]: https://blog.csdn.net/weixin_42590539/article/details/154326188?utm_source=chatgpt.com "基于FreeRTOS的CanFestival协议栈心跳机制实战例程原创"

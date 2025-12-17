@@ -1,0 +1,275 @@
+좋아, 이제 **STM32F407G-DISC1 + BNO055 → CAN으로 IMU 각도 보내는 노드**로 바꿔보자.
+이미 IMU는 잘 읽고 있으니까, 거기에 **CAN 초기화 + 전송 함수**만 얹으면 된다.
+
+구조는 ESP32 코드랑 똑같이 갈 거야:
+
+* **보내는 내용**: heading(=yaw), roll, pitch
+* **스케일**: 각도(°) × 100 → `int16_t` 3개 = 6바이트
+* **CAN ID**: `0x100` (ESP32 쪽이랑 동일)
+* **속도**: 250 kbps (APB1=42MHz, Prescaler=12, BS1=11TQ, BS2=2TQ 조합)
+
+아래는 **기존 stm_imu 코드에 필요한 부분만 추가/수정한 버전**이야.
+(설명 + 코드 위치 그대로 써줄게)
+
+---
+
+## 1. 전역 변수에 CAN 관련 추가
+
+`/* Private variables ---------------------------------------------------------*/` 아래쪽에 CAN 핸들이 없으니까 추가해줘.
+
+```c
+/* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+I2S_HandleTypeDef hi2s3;
+SPI_HandleTypeDef hspi1;
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
+CAN_HandleTypeDef hcan1;           // ★ CAN1 핸들 추가
+
+BNO055_HandleTypeDef hBNO055;
+
+float imu_heading_deg = 0.0f;
+float imu_roll_deg    = 0.0f;
+float imu_pitch_deg   = 0.0f;
+float qw, qx, qy, qz;
+float gyro_x, gyro_y, gyro_z;
+float acc_x, acc_y, acc_z;
+
+char uart_tx_buffer[200];
+
+/* CAN 송신용 헤더/버퍼 */
+CAN_TxHeaderTypeDef  canTxHeader;
+uint8_t              canTxData[8];
+uint32_t             canTxMailbox;
+/* USER CODE END PV */
+```
+
+---
+
+## 2. CAN 초기화 함수 추가 (MX_CAN1_Init)
+
+CubeMX에서 이미 CAN1을 켜서 코드가 생성되어 있으면 이 부분은 **중복되면 안 돼**.
+지금 main.c에 없다고 가정하고, 다른 MX_XXX_Init() 함수들 옆에 넣어줘.
+
+```c
+static void MX_CAN1_Init(void)
+{
+  /* USER CODE BEGIN CAN1_Init 0 */
+
+  /* USER CODE END CAN1_Init 0 */
+
+  /* USER CODE BEGIN CAN1_Init 1 */
+
+  /* USER CODE END CAN1_Init 1 */
+  hcan1.Instance = CAN1;
+  hcan1.Init.Prescaler = 12;                     // 250 kbps (42MHz / (12*14))
+  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;            // 11 Tq
+  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;             // 2 Tq  → 총 14Tq, 샘플포인트 ~86%
+  hcan1.Init.TimeTriggeredMode = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;
+  hcan1.Init.AutoWakeUp = DISABLE;
+  hcan1.Init.AutoRetransmission = ENABLE;
+  hcan1.Init.ReceiveFifoLocked = DISABLE;
+  hcan1.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN1_Init 2 */
+
+  /* USER CODE END CAN1_Init 2 */
+}
+```
+
+> 이 초기화 패턴은 ST 튜토리얼/예제에서 쓰는 HAL CAN 기본 형식 그대로야.
+
+---
+
+## 3. CAN 필터 + Start 함수 추가
+
+모든 ID를 그냥 받게 해두는 “전체 허용 필터” 설정이야. (송신 전용이지만, 나중에 수신 테스트용으로도 쓸 수 있어서 이렇게 잡으면 편함)
+
+`/* USER CODE BEGIN 0 */` 구역에 넣어줘.
+
+```c
+/* USER CODE BEGIN 0 */
+
+void CAN1_Start_AllFilter(void)
+{
+    CAN_FilterTypeDef sFilterConfig;
+
+    // 모든 ID 허용 (Mask = 0)
+    sFilterConfig.FilterBank = 0;
+    sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    sFilterConfig.FilterIdHigh = 0x0000;
+    sFilterConfig.FilterIdLow  = 0x0000;
+    sFilterConfig.FilterMaskIdHigh = 0x0000;
+    sFilterConfig.FilterMaskIdLow  = 0x0000;
+    sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+    sFilterConfig.FilterActivation = ENABLE;
+    sFilterConfig.SlaveStartFilterBank = 14;  // 단일 CAN이면 그냥 14 정도로 두면 됨 
+
+    if (HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK) {
+        Error_Handler();
+    }
+
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+/* USER CODE END 0 */
+```
+
+---
+
+## 4. IMU 각도를 CAN 프레임으로 보내는 함수 추가
+
+`/* USER CODE BEGIN 4 */` 아래 IMU_SendData 옆에 하나 더 만들어줘.
+
+```c
+/* USER CODE BEGIN 4 */
+
+// heading, roll, pitch [deg] → CAN 0x100, int16(centi-deg) 3개로 송신
+void IMU_SendData_CAN(float heading_deg, float roll_deg, float pitch_deg)
+{
+    // 1) 각도 *100 해서 0.01도 단위 정수화
+    int16_t yaw_centi   = (int16_t)(heading_deg * 100.0f);
+    int16_t roll_centi  = (int16_t)(roll_deg    * 100.0f);
+    int16_t pitch_centi = (int16_t)(pitch_deg   * 100.0f);
+
+    // 2) CAN 헤더 설정 (ESP32와 동일 포맷)
+    canTxHeader.StdId = 0x100;          // CAN_ID_IMU_EULER
+    canTxHeader.IDE   = CAN_ID_STD;     // 표준 11bit ID
+    canTxHeader.RTR   = CAN_RTR_DATA;   // 데이터 프레임
+    canTxHeader.DLC   = 6;              // yaw, roll, pitch = 6바이트
+    canTxHeader.TransmitGlobalTime = DISABLE;
+
+    // 3) Little-endian으로 데이터 패킹
+    canTxData[0] = (uint8_t)(yaw_centi & 0xFF);
+    canTxData[1] = (uint8_t)((yaw_centi >> 8) & 0xFF);
+    canTxData[2] = (uint8_t)(roll_centi & 0xFF);
+    canTxData[3] = (uint8_t)((roll_centi >> 8) & 0xFF);
+    canTxData[4] = (uint8_t)(pitch_centi & 0xFF);
+    canTxData[5] = (uint8_t)((pitch_centi >> 8) & 0xFF);
+    // 6,7은 비움
+
+    if (HAL_CAN_AddTxMessage(&hcan1, &canTxHeader, canTxData, &canTxMailbox) != HAL_OK) {
+        // 필요하면 여기서 에러 디버깅 (LED 토글, 브레이크포인트 등)
+    }
+}
+
+void IMU_SendData(float heading, float roll, float pitch)
+{
+    // 기존 UART 디버그 출력 그대로 유지
+    int len = snprintf(uart_tx_buffer, sizeof(uart_tx_buffer),
+                       "H:%.2f,R:%.2f,P:%.2f\r\n",
+                       heading, roll, pitch);
+
+    HAL_UART_Transmit(&huart2, (uint8_t*)uart_tx_buffer, len, HAL_MAX_DELAY);
+}
+/* USER CODE END 4 */
+```
+
+> `HAL_CAN_AddTxMessage` 사용 방식은 ST 공식 튜토리얼/예제와 동일한 패턴이야.
+
+---
+
+## 5. main() 안에서 CAN 초기화 호출 + 루프 수정
+
+### 5-1. 초기화 부분에서 CAN 추가
+
+`/* Initialize all configured peripherals */` 근처에 `MX_CAN1_Init();`와 `CAN1_Start_AllFilter();`를 추가해야 해.
+
+```c
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_I2C1_Init();
+  MX_I2S3_Init();
+  MX_SPI1_Init();
+  MX_USB_HOST_Init();
+  MX_CAN1_Init();          // ★ CAN1 초기화 추가
+
+  ...
+  HAL_Delay(5000);
+  MX_USART2_UART_Init();
+
+  /* USER CODE BEGIN 2 */
+  uint8_t buffer[256];
+
+  // CAN 필터 + Start
+  CAN1_Start_AllFilter();  // ★ CAN 시작
+
+  hBNO055.hi2c   = &hi2c1;
+  hBNO055.address = 0x28;
+  ...
+```
+
+### 5-2. 메인 루프에서 CAN 송신 추가
+
+지금은 IMU 읽고 나서 `IMU_SendData(...)`만 호출하고 있으니,
+그 아래에 **CAN 송신 함수도 같이 호출**하면 된다.
+
+```c
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+      if (BNO055_ReadEuler(&hBNO055,
+                           &imu_heading_deg,
+                           &imu_roll_deg,
+                           &imu_pitch_deg) == HAL_OK) {
+          // UART 디버그
+          IMU_SendData(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
+
+          // CAN 송신 (ESP32와 동일 포맷)
+          IMU_SendData_CAN(imu_heading_deg, imu_roll_deg, imu_pitch_deg);
+      }
+
+      // HAL_Delay(80);  // 필요하면 다시 넣기 (센서/버스 속도 조절)
+      MX_USB_HOST_Process();
+  }
+```
+
+---
+
+## 6. 하드웨어/설정 체크 포인트
+
+마지막으로 한 번만 정리:
+
+1. **CAN 핀**
+
+   * CAN1_RX = **PD0**, CAN1_TX = **PD1** (AF9) 로 CubeMX에서 설정
+   * PD1 → SN65HVD230 **TXD**, PD0 → SN65HVD230 **RXD**
+
+2. **SN65HVD230 전원**
+
+   * VCC = 3.3V
+   * GND = GND
+   * RS = GND (하이 속도 모드)
+
+3. **CAN 속도**
+
+   * STM32: 250kbps (위 MX_CAN1_Init 값)
+   * ESP32: `TWAI_TIMING_CONFIG_250KBITS()` 사용 중이어야 함.
+
+4. **버스**
+
+   * CANH ↔ CANH, CANL ↔ CANL, GND 공통
+   * 양 끝 노드에만 120Ω 종단저항 2개 (총 60Ω)
+
+---
+
+이렇게만 하면:
+
+* STM32F407이 BNO055에서 읽은 `heading/roll/pitch`를
+* ESP32에서 쓰던 것과 같은 포맷(0x100, centi-deg 3개)으로 CAN에 계속 뿌리게 돼.
+
+그 다음 단계로는,
+ESP32 수신 코드에서 STM32 → ESP32가 잘 들어오는지 비교해 보고,
+OK면 **ESP32 없이 F407 ↔ F407** 구조로 그대로 옮기면 된다.
+(필요하면 F407 수신 코드도 이어서 만들어줄게.)
