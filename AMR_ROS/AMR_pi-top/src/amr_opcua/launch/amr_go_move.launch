@@ -50,4 +50,27 @@
 
   </node>
 
+  <!-- Serial settings -->
+  <arg name="port" default="/dev/ttyUSB0"/>
+  <arg name="baud" default="115200"/>
+  <arg name="timeout" default="1.0"/>
+  <arg name="write_newline" default="true"/>
+  <arg name="reconnect_on_fail" default="true"/>
+  <arg name="reconnect_delay" default="0.5"/>
+  
+  <node pkg="amr_mcu"
+        type="amr_mcu_serial_node.py"
+        name="amr_mcu_serial_node"
+        output="screen"
+        respawn="true"
+        respawn_delay="1.0">
+
+    <param name="port" value="$(arg port)"/>
+    <param name="baud" value="$(arg baud)"/>
+    <param name="timeout" value="$(arg timeout)"/>
+    <param name="write_newline" value="$(arg write_newline)"/>
+    <param name="reconnect_on_fail" value="$(arg reconnect_on_fail)"/>
+    <param name="reconnect_delay" value="$(arg reconnect_delay)"/>
+  </node>
+
 </launch>

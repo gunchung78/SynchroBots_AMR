@@ -1,0 +1,7 @@
+string status
+string source_station
+string target_station
+string action_type
+---
+bool success
+string message

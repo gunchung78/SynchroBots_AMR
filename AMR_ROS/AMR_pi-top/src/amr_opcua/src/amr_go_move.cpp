@@ -10,6 +10,8 @@
 #include <sstream>
 #include <cmath>
 #include <std_srvs/SetBool.h>
+#include <amr_msg/SetMcuValue.h>
+#include <amr_msg/SetStatus.h>
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
@@ -55,8 +57,10 @@ public:
     // Publisher for mission state (write_opcua_node.py will subscribe this)
     mission_pub_ = nh_.advertise<std_msgs::String>("amr_mission_state", 10);
 
-    // ¡Ú /go_aruco 
-    go_aruco_client_ = nh_.serviceClient<std_srvs::SetBool>("/go_aruco");
+    // Service clients
+    go_aruco_client_  = nh_.serviceClient<std_srvs::SetBool>("/go_aruco");
+    amr_mcu_client_   = nh_.serviceClient<amr_msg::SetMcuValue>("/amr_mcu");
+    set_status_client_ = nh_.serviceClient<amr_msg::SetStatus>("/set_status");
 
     ROS_INFO("Waiting for move_base action server...");
     ac_.waitForServer();
@@ -64,7 +68,7 @@ public:
   }
 
 private:
-  // Helper: trim spaces and tabs from both ends of a string.
+  // Trim spaces and tabs from both ends of a string.
   static std::string trim(const std::string& s)
   {
     std::size_t start = 0;
@@ -91,8 +95,8 @@ private:
     return s.substr(start, end - start);
   }
 
-  // Helper: parse move_command from simple JSON string.
-  // Expected pattern:
+  // Parse move_command from simple JSON string.
+  // Expected:
   // { "move_command" : "go_home" }
   // or
   // { "move_command" : "pick_up_zone" }
@@ -111,13 +115,11 @@ private:
       return std::string();
     }
 
-    // Find first quote after colon
     std::size_t first_quote = json_str.find('"', colon_pos);
     if (first_quote == std::string::npos)
     {
       return std::string();
     }
-    // Find second quote
     std::size_t second_quote = json_str.find('"', first_quote + 1);
     if (second_quote == std::string::npos)
     {
@@ -129,12 +131,9 @@ private:
     return trim(value);
   }
 
-  // Helper: parse object_info list from simple JSON string.
-  // Example payload:
-  // { "object_info" : ["esp32","motordriver","powersuplpy"] }
-  //
-  // This function extracts the part between '[' and ']', splits by comma,
-  // trims spaces, and removes double quotes.
+  // Parse object_info list from simple JSON string.
+  // Example:
+  // { "object_info" : ["ESP32","MB102","L298N"] }
   std::vector<std::string> parseObjectInfoList(const std::string& json_str)
   {
     std::vector<std::string> result;
@@ -162,7 +161,6 @@ private:
     {
       std::string token = trim(item);
 
-      // Remove double quotes if present
       if (!token.empty() &&
           token.front() == '"' &&
           token.back() == '"' &&
@@ -182,11 +180,6 @@ private:
   }
 
   // Common helper function to send a navigation goal to move_base.
-  // - x, y: target position in map frame
-  // - yaw_deg: yaw angle in degrees
-  // - target_name: name used only for logging
-  // - mission_state: string to publish on amr_mission_state when goal succeeds;
-  //                  if empty, nothing will be published.
   void sendGoal(double x, double y, double yaw_deg,
                 const std::string& target_name,
                 const std::string& mission_state)
@@ -238,7 +231,7 @@ private:
     }
   }
 
-  // Expects payload like:
+  // Expects:
   // { "object_info" : ["ESP32","MB102","L298N"] }
   bool sendObjectGoalByName(const std::string& name)
   {
@@ -267,12 +260,81 @@ private:
     }
   }
 
-  // Callback for /amr/opcua/go_move:
-  // Can receive:
-  // - "Ready"
-  // - { "move_command" : "pick_up_zone" }
-  // - { "move_command" : "go_home" }
-  // Also supports simple substring fallback (for older payloads).
+  bool callAmrMcu(int value, const std::string& tag, int retries = 1)
+  {
+    if (value != 0 && value != 1 && value != 2)
+    {
+      ROS_WARN("[amr_go_move] callAmrMcu invalid value=%d (tag=%s)", value, tag.c_str());
+      return false;
+    }
+
+    amr_msg::SetMcuValue mcu_srv;
+    mcu_srv.request.value = value;
+
+    for (int attempt = 0; attempt <= retries; ++attempt)
+    {
+      if (amr_mcu_client_.call(mcu_srv))
+      {
+        if (mcu_srv.response.success)
+        {
+          ROS_INFO("[amr_go_move] /amr_mcu OK (tag=%s, value=%d): %s",
+                   tag.c_str(), value, mcu_srv.response.message.c_str());
+          return true;
+        }
+        else
+        {
+          ROS_WARN("[amr_go_move] /amr_mcu FAIL response (tag=%s, value=%d): %s",
+                   tag.c_str(), value, mcu_srv.response.message.c_str());
+          return false;
+        }
+      }
+
+      ROS_ERROR("[amr_go_move] /amr_mcu call failed (tag=%s, value=%d, attempt=%d/%d)",
+                tag.c_str(), value, attempt + 1, retries + 1);
+
+      ros::Duration(0.1).sleep();
+    }
+    return false;
+  }
+
+  bool callSetStatus(bool enable, const std::string& tag, int retries = 1)
+  {
+    amr_msg::SetStatus status_srv;
+    status_srv.request.enable = enable;
+
+    for (int attempt = 0; attempt <= retries; ++attempt)
+    {
+      if (set_status_client_.call(status_srv))
+      {
+        if (status_srv.response.success)
+        {
+          ROS_INFO("[amr_go_move] /set_status OK (tag=%s, enable=%s): %s",
+                   tag.c_str(),
+                   enable ? "true" : "false",
+                   status_srv.response.message.c_str());
+          return true;
+        }
+        else
+        {
+          ROS_WARN("[amr_go_move] /set_status FAIL response (tag=%s, enable=%s): %s",
+                   tag.c_str(),
+                   enable ? "true" : "false",
+                   status_srv.response.message.c_str());
+          return false;
+        }
+      }
+
+      ROS_ERROR("[amr_go_move] /set_status call failed (tag=%s, enable=%s, attempt=%d/%d)",
+                tag.c_str(),
+                enable ? "true" : "false",
+                attempt + 1, retries + 1);
+
+      ros::Duration(0.1).sleep();
+    }
+    return false;
+  }
+
+  // Callback for /amr/opcua/go_move
   void opcuaMoveCallback(const std_msgs::String::ConstPtr& msg)
   {
     const std::string& data = msg->data;
@@ -290,7 +352,6 @@ private:
       return;
     }
 
-    // Try to parse JSON-style move_command first
     std::string cmd = parseMoveCommand(data);
     std::string effective_cmd;
 
@@ -300,7 +361,6 @@ private:
     }
     else
     {
-      // Fallback: detect by substring for backward compatibility
       if (data.find("pick_up_zone") != std::string::npos)
       {
         effective_cmd = "pick_up_zone";
@@ -317,16 +377,14 @@ private:
       return;
     }
 
-    // Save last command (raw payload) after successful parsing
     last_move_command_ = data;
 
     if (effective_cmd == "pick_up_zone")
     {
       ROS_INFO("[amr_go_move] Detected move_command: pick_up_zone");
 
-
       std_srvs::SetBool srv;
-      srv.request.data = true;  
+      srv.request.data = true;
 
       if (go_aruco_client_.call(srv))
       {
@@ -334,7 +392,19 @@ private:
         {
           ROS_INFO("[amr_go_move] /go_aruco service call succeeded: %s",
                    srv.response.message.c_str());
-      
+
+          const bool mcu_ok = callAmrMcu(1, "PICK", 1);
+          if (!mcu_ok)
+          {
+            ROS_WARN("[amr_go_move] MCU signal failed, but continuing mission publish.");
+          }
+
+          const bool status_ok = callSetStatus(true, "LOGGER_ON", 1);
+          if (!status_ok)
+          {
+            ROS_WARN("[amr_go_move] /set_status failed to enable logger.");
+          }
+
           std_msgs::String state_msg;
           state_msg.data = "PICK";
           mission_pub_.publish(state_msg);
@@ -350,12 +420,45 @@ private:
       {
         ROS_ERROR("[amr_go_move] Failed to call /go_aruco service.");
       }
-     
     }
     else if (effective_cmd == "go_home")
     {
       ROS_INFO("[amr_go_move] Detected move_command: go_home");
       sendGoHomeGoal();
+    
+      // NEW: disable DB logger via /set_status after going home
+      const bool status_ok = callSetStatus(false, "LOGGER_OFF", 1);
+      if (!status_ok)
+      {
+        ROS_WARN("[amr_go_move] /set_status failed to disable logger after go_home.");
+      }
+    
+      std_srvs::SetBool srv;
+      srv.request.data = true;
+    
+      if (go_aruco_client_.call(srv))
+      {
+        if (srv.response.success)
+        {
+          ROS_INFO("[amr_go_move] /go_aruco service call succeeded: %s",
+                   srv.response.message.c_str());
+    
+          const bool mcu_ok = callAmrMcu(0, "RESET", 1);
+          if (!mcu_ok)
+          {
+            ROS_WARN("[amr_go_move] MCU signal failed, but continuing.");
+          }
+        }
+        else
+        {
+          ROS_WARN("[amr_go_move] /go_aruco responded but reported failure: %s",
+                   srv.response.message.c_str());
+        }
+      }
+      else
+      {
+        ROS_ERROR("[amr_go_move] Failed to call /go_aruco service.");
+      }
     }
     else
     {
@@ -363,10 +466,7 @@ private:
     }
   }
 
-  // Callback for /amr/opcua/go_positions:
-  // Expects payload like:
-  // { "object_info" : ["esp32","motordriver","powersuplpy"] }
-  // Goals will be sent to move_base in the given order.
+  // Callback for /amr/opcua/go_positions
   void opcuaPositionsCallback(const std_msgs::String::ConstPtr& msg)
   {
     const std::string& data = msg->data;
@@ -391,25 +491,37 @@ private:
       return;
     }
 
-    // Save last command after successful parsing
     last_positions_command_ = data;
 
     ROS_INFO("[amr_go_move] Parsed %zu object(s) from object_info list.", object_list.size());
 
-    // Send goals to move_base in the same order as in the list.
+    const bool mcu_ok0 = callAmrMcu(0, "RESET", 1);
+    if (!mcu_ok0)
+    {
+      ROS_WARN("[amr_go_move] MCU signal failed, but continuing.");
+    }
+
     for (std::size_t i = 0; i < object_list.size(); ++i)
     {
       const std::string& name = object_list[i];
       ROS_INFO("[amr_go_move] Processing object_info[%zu] = %s", i, name.c_str());
-      sendObjectGoalByName(name);
+      const bool goal_ok = sendObjectGoalByName(name);
+      if (goal_ok)
+      {
+        const bool mcu_ok2 = callAmrMcu(2, "PLACE", 1);
+        if (!mcu_ok2)
+        {
+          ROS_WARN("[amr_go_move] MCU signal failed after PLACE, but continuing.");
+        }
+      }
     }
+
     std_msgs::String state_msg;
     state_msg.data = "DONE";
     mission_pub_.publish(state_msg);
     ROS_INFO("[amr_go_move] Published amr_mission_state = 'DONE'");
   }
 
-  // Wrapper to send pick_up_zone goal using the common helper.
   void sendPickUpZoneGoal()
   {
     sendGoal(pick_up_zone_x_,
@@ -419,10 +531,8 @@ private:
              "PICK");
   }
 
-  // Wrapper to send go_home goal using the common helper.
   void sendGoHomeGoal()
   {
-    // You can change "HOME" to any mission_state string you want.
     sendGoal(go_home_x_,
              go_home_y_,
              go_home_yaw_deg_,
@@ -461,6 +571,8 @@ private:
   double powersuplpy_yaw_deg_;
 
   ros::ServiceClient go_aruco_client_;
+  ros::ServiceClient amr_mcu_client_;
+  ros::ServiceClient set_status_client_;
 };
 
 int main(int argc, char** argv)

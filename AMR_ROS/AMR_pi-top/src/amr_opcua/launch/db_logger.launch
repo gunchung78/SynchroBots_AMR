@@ -1,0 +1,41 @@
+<launch>
+  <!-- parameter -->
+  <arg name="equipment_id" default="AMR01" />
+
+  <!-- ========================= -->
+  <!-- 1) AMR STATE DB LOGGER -->
+  <!-- ========================= -->
+  <node pkg="amr_db_logger"
+        type="amr_state_db_logger_node"
+        name="amr_state_db_logger"
+        output="screen">
+
+    <!-- equipment_id -->
+    <param name="equipment_id" value="$(arg equipment_id)" />
+
+    <!-- subscribe TOPIC -->
+    <param name="topic_amcl" value="/amcl_pose" />
+    <param name="topic_odom" value="/odom" />
+
+    <!-- Frequency -->
+    <param name="write_hz" value="2.0" />
+
+    <!-- STOP processing -->
+    <param name="stop_mode" value="pause" />
+    <param name="stale_warn_sec" value="1.0" />
+    <param name="default_status" value="IDLE" />
+    <param name="start_enabled" value="true" />
+  </node>
+
+  <!-- ========================= -->
+  <!-- 2) MISSION LOGGER -->
+  <!-- ========================= -->
+  <node pkg="amr_db_logger"
+        type="amr_mission_logger_node"
+        name="amr_mission_logger"
+        output="screen">
+
+    <param name="equipment_id" value="$(arg equipment_id)" />
+  </node>
+
+</launch>
