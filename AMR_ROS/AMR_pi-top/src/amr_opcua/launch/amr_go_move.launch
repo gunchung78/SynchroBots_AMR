@@ -10,11 +10,19 @@
 
     <!-- go_home pose (example values, change to your map pose) -->
     <param name="go_home_x"
-           value="-0.7507189512252808" />
+           value="0.0" />
     <param name="go_home_y"
-           value="0.510118305683136" />
+           value="0.0" />
     <param name="go_home_yaw_deg"
            value="0.0" />
+           
+    <!-- go_standby pose (example values, change to your map pose) -->
+    <param name="go_standby_x"
+           value="3.2069199085235596" />
+    <param name="go_standby_y"
+           value="-0.5" />
+    <param name="go_standby_yaw_deg"
+           value="90.0" />
 
     <!-- pick_up_zone pose -->
     <param name="pick_up_zone_x"
@@ -26,27 +34,27 @@
 
     <!-- esp32 pose -->
     <param name="esp32_x"
-           value="-0.4634603261947632" />
+           value="2.783353567123413" />
     <param name="esp32_y"
-           value="1.5847265720367432" />
+           value="-2.940829038619995" />
     <param name="esp32_yaw_deg"
-           value="90.0" />
+           value="-90.0" />
 
     <!-- motordriver pose (example values) -->
     <param name="motordriver_x"
-           value="2.104982852935791" />
+           value="1.1764261722564697" />
     <param name="motordriver_y"
-           value="1.6602497100830078" />
+           value="-2.9662137031555176" />
     <param name="motordriver_yaw_deg"
-           value="90.0" />
+           value="-90.0" />
 
     <!-- powersuplpy pose (example values) -->
     <param name="powersuplpy_x"
-           value="3.8870227336883545" />
+           value="-0.779" />
     <param name="powersuplpy_y"
-           value="0.6789782643318176" />
+           value="-2.570" />
     <param name="powersuplpy_yaw_deg"
-           value="0.0" />
+           value="-90.0" />
 
   </node>
 
@@ -72,5 +80,44 @@
     <param name="reconnect_on_fail" value="$(arg reconnect_on_fail)"/>
     <param name="reconnect_delay" value="$(arg reconnect_delay)"/>
   </node>
+  
+  <!-- parameter -->
+  <arg name="equipment_id" default="AMR01" />
 
+  <!-- ========================= -->
+  <!-- 1) AMR STATE DB LOGGER -->
+  <!-- ========================= -->
+  <node pkg="amr_db_logger"
+        type="amr_state_db_logger_node"
+        name="amr_state_db_logger"
+        output="screen">
+
+    <!-- equipment_id -->
+    <param name="equipment_id" value="$(arg equipment_id)" />
+
+    <!-- subscribe TOPIC -->
+    <param name="topic_amcl" value="/amcl_pose" />
+    <param name="topic_odom" value="/odom" />
+
+    <!-- Frequency -->
+    <param name="write_hz" value="2.0" />
+
+    <!-- STOP processing -->
+    <param name="stop_mode" value="pause" />
+    <param name="stale_warn_sec" value="1.0" />
+    <param name="default_status" value="RUNNING" />
+    <param name="start_enabled" value="false" />
+  </node>
+
+  <!-- ========================= -->
+  <!-- 2) MISSION LOGGER -->
+  <!-- ========================= -->
+  <node pkg="amr_db_logger"
+        type="amr_mission_logger_node"
+        name="amr_mission_logger"
+        output="screen">
+
+    <param name="equipment_id" value="$(arg equipment_id)" />
+  </node>
+  
 </launch>
