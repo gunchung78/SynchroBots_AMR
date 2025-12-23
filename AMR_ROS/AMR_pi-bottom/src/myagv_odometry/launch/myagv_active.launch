@@ -10,14 +10,11 @@
     
     <node pkg="amcl" type="amcl" name="amcl" output="screen">
         <rosparam file="$(find myagv_navigation)/param/amcl.yaml" command="load" />
-        <param name="initial_pose_x" value="0.00"/>
-        <param name="initial_pose_y" value="-0.05"/>
+        <param name="initial_pose_x" value="0.0"/>
+        <param name="initial_pose_y" value="0.0"/>
         <param name="initial_pose_a" value="0.0 "/>
     </node>
     
-    <node pkg="amr_opencv"
-        type="amr_aruco_all_in_one.py"
-        name="amr_aruco_all_in_one"
-        output="screen" />
+    <node pkg="amr_opencv" type="amr_aruco_all_in_one.py" name="amr_aruco_all_in_one" output="screen"/>
 
 </launch>
