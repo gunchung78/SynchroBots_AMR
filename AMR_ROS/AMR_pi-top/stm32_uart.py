@@ -1,6 +1,6 @@
 import serial
 
-ser = serial.Serial('/dev/serial0', 115200, timeout=1)
+ser = serial.Serial('/dev/ttyAMA1', 115200, timeout=1)
 print("OPEN:", ser.is_open)
 
 while True:

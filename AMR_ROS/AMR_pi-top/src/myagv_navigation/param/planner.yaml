@@ -56,7 +56,7 @@ TrajectoryPlannerROS:
   latch_xy_goal_tolerance: false
 
   # Forward Simulation Parameters
-  sim_time: 1.0
+  sim_time: 1.5
   sim_granularity: 0.02
   angular_sim_granularity: 0.02
   vx_samples: 3
@@ -103,15 +103,15 @@ DWAPlannerROS:
   latch_xy_goal_tolerance: true
 
   # # Forward Simulation Parameters
-  sim_time: 2.5 # 11-15 2.0
-  sim_granularity: 0.02
-  vx_samples: 10
+  sim_time: 1.5 # 11-15 2.0
+  sim_granularity: 0.05
+  vx_samples: 6
   vy_samples: 0
-  vtheta_samples: 28
+  vtheta_samples: 15
   penalize_negative_x: true
 
   # # Trajectory scoring parameters
-  path_distance_bias: 28.0 # The weighting for how much the controller should stay close to the path it was given 				32.0 11-15
+  path_distance_bias: 32.0 # The weighting for how much the controller should stay close to the path it was given 				32.0 11-15
   goal_distance_bias: 18.0 # The weighting for how much the controller should attempt to reach its local goal, also controls speed	24.0 11-15
   occdist_scale: 0.05 # The weighting for how much the controller should attempt to avoid obstacles						0.2  11-15
   forward_point_distance: 0.4 # The distance from the center point of the robot to place an additional scoring point, in meters

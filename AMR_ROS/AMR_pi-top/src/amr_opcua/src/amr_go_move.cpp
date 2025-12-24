@@ -418,7 +418,7 @@ private:
       // Step 1: Move back to clear the rack
       ROS_INFO("[amr_go_move] [Step 1/4] Moving backward manually ");
       moveManual(-0.10, 0, 6.5);
-      moveManual(0, -0.16, 5.2);
+      moveManual(0, -0.16, 4.7);
       // Step 2: Navigate to intermediate standby point
       ROS_INFO("[amr_go_move] [Step 2/4] Navigating to standby position...");
       if (!sendGostandbyGoal())
@@ -449,7 +449,7 @@ private:
         ROS_INFO("[amr_go_move] Repeated pick_up_zone - Only publishing PICK");
     }
     
-    callSetMission("RUNNING", "LOADING", "LOADING", "LOADING");
+    //callSetMission("RUNNING", "LOADING", "LOADING", "LOADING");
     std_msgs::String msg;
     msg.data = "PICK";
     mission_pub_.publish(msg);

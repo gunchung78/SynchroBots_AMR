@@ -1,6 +1,6 @@
-#footprint: [[0.10, 0.08], [0.10,-0.08], [-0.10, -0.08], [-0.10, 0.08]]
+footprint: [[0.10, 0.08], [0.10,-0.08], [-0.10, -0.08], [-0.10, 0.08]]
 #footprint: [[0.08, 0.06], [0.08,-0.06], [-0.08, -0.06], [-0.08, 0.06]]
-footprint: [[0.12, 0.10], [0.12,-0.10], [-0.12, -0.10], [-0.12, 0.10]]
+#footprint: [[0.12, 0.10], [0.12,-0.10], [-0.12, -0.10], [-0.12, 0.10]]
 footprint_padding: 0.03
 
 transform_tolerance: 0.2
@@ -28,7 +28,7 @@ obstacle_layer:
 inflation_layer:
   enabled: true
   cost_scaling_factor: 2.5 # 5.0 11-15
-  inflation_radius: 0.25 # 0.06 11-15
+  inflation_radius: 0.22 # 0.06 11-15
 
 static_layer:
   enabled: true
