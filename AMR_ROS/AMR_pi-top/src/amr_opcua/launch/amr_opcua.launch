@@ -1,12 +1,14 @@
 <launch>
-
+  
+  <arg name="opcua_ip" default="opc.tcp://172.30.1.61:4840/freeopcua/server/"/>
+  
   <!-- OPC UA read node -->
   <node pkg="amr_opcua"
         type="read_opcua_node.py"
         name="read_opcua"
         output="screen">
     <param name="opcua_url"
-           value="opc.tcp://172.30.1.61:0630/freeopcua/server/" />
+           value="$(arg opcua_ip)" />
   </node>
 
   <!-- OPC UA write node -->
@@ -15,7 +17,7 @@
         name="write_opcua"
         output="screen">
     <param name="opcua_url"
-           value="opc.tcp://172.30.1.61:0630/freeopcua/server/" />
+           value="$(arg opcua_ip)" />
   </node>
 
   <!-- AMR go_move node (C++: amr_go_move.cpp) -->
@@ -25,14 +27,22 @@
         type="amr_go_move_node"
         name="amr_go_move"
         output="screen">
-
-    <!-- go_home pose (example values, change to your map pose) -->
+    
+    <!-- go_home pose -->
     <param name="go_home_x"
-           value="-0.7507189512252808" />
+           value="0.0" />
     <param name="go_home_y"
-           value="0.510118305683136" />
+           value="0.2" />
     <param name="go_home_yaw_deg"
            value="0.0" />
+                  
+    <!-- go_standby pose -->
+    <param name="go_standby_x"
+           value="3.20" />
+    <param name="go_standby_y"
+           value="-0.7" />
+    <param name="go_standby_yaw_deg"
+           value="90.0" />
 
     <!-- pick_up_zone pose -->
     <param name="pick_up_zone_x"
@@ -44,27 +54,27 @@
 
     <!-- esp32 pose -->
     <param name="esp32_x"
-           value="-0.18510204553604126" />
+           value="2.783353567123413" />
     <param name="esp32_y"
-           value="2.7689642906188965" />
+           value="-2.940829038619995" />
     <param name="esp32_yaw_deg"
-           value="90.0" />
+           value="-90.0" />
 
     <!-- motordriver pose (example values) -->
     <param name="motordriver_x"
-           value="2.166576623916626" />
+           value="1.1764261722564697" />
     <param name="motordriver_y"
-           value="2.8864500522613525" />
+           value="-2.9662137031555176" />
     <param name="motordriver_yaw_deg"
-           value="90.0" />
+           value="-90.0" />
 
     <!-- powersuplpy pose (example values) -->
-    <param name="powersuplpy_x"
-           value="4.279068946838379" />
-    <param name="powersuplpy_y"
-           value="2.5080320835113525" />
-    <param name="powersuplpy_yaw_deg"
-           value="0.0" />
+    <param name="powersupply_x"
+           value="-0.779" />
+    <param name="powersupply_y"
+           value="-2.570" />
+    <param name="powersupply_yaw_deg"
+           value="-90.0" />
 
   </node>
 
@@ -110,13 +120,13 @@
     <param name="topic_odom" value="/odom" />
 
     <!-- Frequency -->
-    <param name="write_hz" value="2.0" />
+    <param name="write_hz" value="1.0" />
 
     <!-- STOP processing -->
     <param name="stop_mode" value="pause" />
     <param name="stale_warn_sec" value="1.0" />
-    <param name="default_status" value="IDLE" />
-    <param name="start_enabled" value="true" />
+    <param name="default_status" value="RUNNING" />
+    <param name="start_enabled" value="false" />
   </node>
 
   <!-- ========================= -->
