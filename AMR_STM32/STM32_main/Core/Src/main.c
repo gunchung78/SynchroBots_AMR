@@ -19,11 +19,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_host.h"
-#include <stdint.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,9 +49,8 @@ I2C_HandleTypeDef hi2c1;
 
 I2S_HandleTypeDef hi2s3;
 
-SPI_HandleTypeDef hspi1;
-
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 
@@ -61,13 +61,20 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_I2S3_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_USART3_UART_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
+static void IMU_SendData(float heading, float roll, float pitch);
+static void CAN1_FilterOnly_StdId_FIFO0(uint16_t stdId);
+static void CAN1_StartRxInterrupt(void);
 
+static void CAN1_TxInit_LoadingCmd(void);
+static void CAN1_SendLoadingCmd(uint8_t cmd, uint8_t arg);
+
+static void UART3_StartRxIT(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -75,65 +82,121 @@ void MX_USB_HOST_Process(void);
 static CAN_RxHeaderTypeDef rxh;
 static uint8_t rxData[8];
 
-// UART 출력 버퍼 (라즈베리파이로 보낼 문자열)
-static char uart_tx_buffer[64];
-
 volatile float g_roll_deg  = 0.0f;
 volatile float g_pitch_deg = 0.0f;
 volatile float g_yaw_deg   = 0.0f;
 volatile uint8_t g_imu_new = 0;
 
-// 디버그/검증용(경고 제거 + 누락 검출)
-volatile uint8_t g_seq = 0;
-volatile uint8_t g_status = 0;
+volatile uint8_t  g_seq = 0;
+volatile uint8_t  g_status = 0;
 volatile uint32_t g_rx_count = 0;
 volatile uint32_t g_seq_miss_count = 0;
 volatile uint32_t g_last_rx_ms = 0;
 
-static void IMU_SendData(float heading, float roll, float pitch, uint8_t status, uint8_t seq)
+/* UART2 출력 버퍼 */
+static char uart_tx_buffer[96];
+
+/* ------------------------- UART3 RX (Raspi -> main) ------------------------- */
+static uint8_t  u3_rx_byte;
+static char     u3_line_buf[64];
+static uint16_t u3_line_len = 0;
+volatile uint8_t g_u3_line_ready = 0;
+static char     g_u3_line_copy[64];   // main loop에서 안전하게 쓰기 위한 복사본
+
+/* ------------------------- CAN TX (to STM32_loading) ------------------------- */
+static CAN_TxHeaderTypeDef txh_load;
+static uint8_t txLoadData[8];
+static uint32_t txMailbox;
+
+/* ------------------------- Utility: IMU UART Output ------------------------- */
+static void IMU_SendData(float heading, float roll, float pitch)
 {
-    // 라즈베리파이에서 그대로 파싱하기 좋은 포맷
-    // 필요하면 status/seq도 함께 내보내 디버그 가능
+    // Raspi에서 파싱하기 쉬운 포맷
+    // 예: "H:123.45,R:1.23,P:-4.56\r\n"
     int len = snprintf(uart_tx_buffer, sizeof(uart_tx_buffer),
-                       "H:%.2f,R:%.2f,P:%.2f,S:%u,Q:%u\r\n",
-                       heading, roll, pitch, (unsigned)status, (unsigned)seq);
-    if (len < 0) return;
-    HAL_UART_Transmit(&huart2, (uint8_t*)uart_tx_buffer, (uint16_t)len, 50);
+                       "H:%.2f,R:%.2f,P:%.2f\r\n",
+                       heading, roll, pitch);
+
+    if (len <= 0) return;
+    if (len > (int)sizeof(uart_tx_buffer)) len = sizeof(uart_tx_buffer);
+
+    // main loop에서만 호출(인터럽트에서 호출하지 않음)
+    (void)HAL_UART_Transmit(&huart2, (uint8_t*)uart_tx_buffer, (uint16_t)len, 50);
 }
 
+/* ------------------------- CAN Filter: only StdId -> FIFO0 ------------------------- */
 static void CAN1_FilterOnly_StdId_FIFO0(uint16_t stdId)
 {
-  CAN_FilterTypeDef f = {0};
+    CAN_FilterTypeDef f = {0};
 
-  f.FilterBank = 0;
-  f.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  f.FilterActivation = ENABLE;
+    f.FilterBank = 0;
+    f.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+    f.FilterActivation = ENABLE;
 
-  // ✅ 가장 덜 헷갈리는 방식: 16-bit IDLIST (4개 ID 슬롯에 동일 ID를 넣어 "사실상 1개 ID만 허용")
-  // StdID는 비트 위치 때문에 <<5 필요 :contentReference[oaicite:4]{index=4}
-  f.FilterMode  = CAN_FILTERMODE_IDLIST;
-  f.FilterScale = CAN_FILTERSCALE_16BIT;
+    // 16-bit IDLIST: 동일 ID를 4슬롯에 넣어 사실상 1개 ID만 허용
+    f.FilterMode  = CAN_FILTERMODE_IDLIST;
+    f.FilterScale = CAN_FILTERSCALE_16BIT;
 
-  uint16_t id = (uint16_t)(stdId << 5);
-  f.FilterIdHigh      = id;
-  f.FilterIdLow       = id;
-  f.FilterMaskIdHigh  = id;
-  f.FilterMaskIdLow   = id;
+    uint16_t id = (uint16_t)(stdId << 5);
+    f.FilterIdHigh      = id;
+    f.FilterIdLow       = id;
+    f.FilterMaskIdHigh  = id;
+    f.FilterMaskIdLow   = id;
 
-  // CAN2까지 같이 쓸 때 분할 기준(지금은 CAN1만이면 크게 상관 없음) :contentReference[oaicite:5]{index=5}
-  f.SlaveStartFilterBank = 14;
+    f.SlaveStartFilterBank = 14;
 
-  if (HAL_CAN_ConfigFilter(&hcan1, &f) != HAL_OK) Error_Handler();
+    if (HAL_CAN_ConfigFilter(&hcan1, &f) != HAL_OK) Error_Handler();
 }
 
 static void CAN1_StartRxInterrupt(void)
 {
-  if (HAL_CAN_Start(&hcan1) != HAL_OK) Error_Handler();
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) Error_Handler();
 
-  // FIFO0에 메시지 들어오면 콜백 호출 :contentReference[oaicite:6]{index=6}
-  if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
-    Error_Handler();
+    // RX FIFO0 pending interrupt enable (callback 패턴)
+    // 이 패턴이 HAL에서 흔히 쓰는 방식임 :contentReference[oaicite:2]{index=2}
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+        Error_Handler();
 }
+
+/* ------------------------- CAN TX to loading board ------------------------- */
+static void CAN1_TxInit_LoadingCmd(void)
+{
+    txh_load.StdId = 0x201;      // <-- loading command ID (원하면 변경)
+    txh_load.IDE   = CAN_ID_STD;
+    txh_load.RTR   = CAN_RTR_DATA;
+    txh_load.DLC   = 2;
+
+    memset(txLoadData, 0, sizeof(txLoadData));
+}
+
+static void CAN1_SendLoadingCmd(uint8_t cmd, uint8_t arg)
+{
+    txLoadData[0] = cmd;
+    txLoadData[1] = arg;
+
+    if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
+        // TX 밀림 표시(선택): LD5 토글
+        HAL_GPIO_TogglePin(GPIOD, LD5_Pin);
+        return;
+    }
+
+    if (HAL_CAN_AddTxMessage(&hcan1, &txh_load, txLoadData, &txMailbox) != HAL_OK) {
+        // TX 실패 표시(선택): LD5 ON
+        HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_SET);
+    }
+}
+
+/* ------------------------- UART3 RX Start ------------------------- */
+static void UART3_StartRxIT(void)
+{
+    u3_line_len = 0;
+    g_u3_line_ready = 0;
+    memset(u3_line_buf, 0, sizeof(u3_line_buf));
+    memset(g_u3_line_copy, 0, sizeof(g_u3_line_copy));
+
+    (void)HAL_UART_Receive_IT(&huart3, &u3_rx_byte, 1);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -167,13 +230,20 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_I2S3_Init();
-  MX_SPI1_Init();
   MX_USB_HOST_Init();
   MX_CAN1_Init();
   MX_USART2_UART_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
+  // 1) CAN 수신(IMU) 준비
   CAN1_FilterOnly_StdId_FIFO0(0x103);
   CAN1_StartRxInterrupt();
+
+  // 2) CAN 송신(loading cmd) 준비
+  CAN1_TxInit_LoadingCmd();
+
+  // 3) UART3 수신(라즈베리파이 명령) 시작
+  UART3_StartRxIT();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -183,36 +253,49 @@ int main(void)
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
-    // ✅ CAN RX 콜백에서 g_imu_new=1로 올리면, main에서 UART로 출력
-    if (g_imu_new) {
-       g_imu_new = 0;
-       // 송신 포맷이 roll,pitch,yaw였으니 yaw를 heading으로 매핑
-       float heading = g_yaw_deg;
-       float roll    = g_roll_deg;
-       float pitch   = g_pitch_deg;
-
-       IMU_SendData(heading, roll, pitch, g_status, g_seq);
-    }
-
-    // 200ms마다 상태 LED로 수신 상태 확인 (인터럽트가 멈춘 'Halt' 중엔 갱신 안 됨)
-    static uint32_t t_prev = 0;
-    uint32_t now = HAL_GetTick();
-    if ((now - t_prev) >= 200) {
-        t_prev = now;
-
-        // 300ms 이상 수신 없으면 RED(LD5) ON
-        if ((now - g_last_rx_ms) > 300) {
-          HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_SET);
-        } else {
-          HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_RESET);
-        }
-
-        // seq miss가 누적되면 ORANGE(LD3) 토글(경고 느낌)
-        if (g_seq_miss_count > 0) {
-          HAL_GPIO_TogglePin(GPIOD, LD3_Pin);
-        }
-    }
     /* USER CODE BEGIN 3 */
+    // --- 에러 복구 및 강제 재시작 코드 ---
+	if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_ORE) || __HAL_UART_GET_FLAG(&huart3, UART_FLAG_NE)) {
+		__HAL_UART_CLEAR_OREFLAG(&huart3);
+		__HAL_UART_CLEAR_NEFLAG(&huart3);
+		HAL_UART_Receive_IT(&huart3, &u3_rx_byte, 1);
+		HAL_GPIO_TogglePin(GPIOD, LD5_Pin); // 에러 발생 시 빨간불 토글
+	}
+
+	// 수신 상태가 준비 완료(Ready)인데 인터럽트가 안 걸려 있다면 다시 걸어줌
+	if (huart3.RxState == HAL_UART_STATE_READY) {
+		HAL_UART_Receive_IT(&huart3, &u3_rx_byte, 1);
+	}
+	// ----------------------------------
+    /* (A) IMU 데이터 출력 */
+	if (g_imu_new) {
+		g_imu_new = 0;
+		IMU_SendData(g_yaw_deg, g_roll_deg, g_pitch_deg);
+	}
+
+	/* (B) 라즈베리파이 명령 처리 및 전송 */
+	if (g_u3_line_ready) {
+		g_u3_line_ready = 0;
+		unsigned int cmd = 999;
+		if (sscanf(g_u3_line_copy, "%u", &cmd) == 1) {
+			if (cmd <= 2) { // 0, 1, 2 명령 처리
+				CAN1_SendLoadingCmd((uint8_t)cmd, 0);
+				HAL_GPIO_TogglePin(GPIOD, LD4_Pin); // 성공 시 녹색 토글
+			}
+		}
+	}
+
+	/* (C) 상태 체크 LED (빨간불 관리) */
+	static uint32_t t_prev = 0;
+	uint32_t now = HAL_GetTick();
+	if ((now - t_prev) >= 200) {
+		t_prev = now;
+		if ((now - g_last_rx_ms) > 300) {
+			HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_SET); // IMU 없으면 빨간불
+		} else {
+			HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_RESET);
+		}
+	}
   }
   /* USER CODE END 3 */
 }
@@ -368,44 +451,6 @@ static void MX_I2S3_Init(void)
 }
 
 /**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -435,6 +480,39 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
 
 }
 
@@ -496,19 +574,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : SPI1_SCK_Pin SPI1_MISO_Pin SPI1_MOSI_Pin */
+  GPIO_InitStruct.Pin = SPI1_SCK_Pin|SPI1_MISO_Pin|SPI1_MOSI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pin : BOOT1_Pin */
   GPIO_InitStruct.Pin = BOOT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : CLK_IN_Pin */
-  GPIO_InitStruct.Pin = CLK_IN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
-  HAL_GPIO_Init(CLK_IN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin
                            Audio_RST_Pin */
@@ -537,50 +615,89 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* ------------------------- CAN RX Callback ------------------------- */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-  // 다른 CAN 인스턴스에서 들어오는 콜백이면 무시(확장 대비)
-  if (hcan->Instance != CAN1) return;
+    if (hcan->Instance != CAN1) return;
 
-  if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxh, rxData) != HAL_OK)
-    return; // (원하면 Error_Handler)
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxh, rxData) != HAL_OK)
+        return;
 
-  if (rxh.IDE != CAN_ID_STD) return;
-  if (rxh.StdId != 0x103) return;
-  if (rxh.DLC < 8) return;
+    if (rxh.IDE != CAN_ID_STD) return;
+    if (rxh.StdId != 0x103) return;
+    if (rxh.DLC < 8) return;
 
-  // 송신이 [MSB, LSB]로 보냈으므로 수신도 동일하게 조립
-  int16_t roll_cdeg  = (int16_t)((rxData[0] << 8) | rxData[1]);
-  int16_t pitch_cdeg = (int16_t)((rxData[2] << 8) | rxData[3]);
-  int16_t yaw_cdeg   = (int16_t)((rxData[4] << 8) | rxData[5]);
+    // [MSB,LSB] 조립
+    int16_t roll_cdeg  = (int16_t)((rxData[0] << 8) | rxData[1]);
+    int16_t pitch_cdeg = (int16_t)((rxData[2] << 8) | rxData[3]);
+    int16_t yaw_cdeg   = (int16_t)((rxData[4] << 8) | rxData[5]);
 
-  // 원본 저장 (디버그 창에서 보기 좋음)
-  g_roll_deg  = roll_cdeg  / 100.0f;
-  g_pitch_deg = pitch_cdeg / 100.0f;
-  g_yaw_deg   = yaw_cdeg   / 100.0f;
+    g_roll_deg  = roll_cdeg  / 100.0f;
+    g_pitch_deg = pitch_cdeg / 100.0f;
+    g_yaw_deg   = yaw_cdeg   / 100.0f;
 
-  uint8_t seq    = rxData[6];
-  uint8_t status = rxData[7];
+    uint8_t seq    = rxData[6];
+    uint8_t status = rxData[7];
 
-  // 전역 저장(경고 제거 + 로깅용)
-  g_seq = seq;
-  g_status = status;
-  g_rx_count++;
-  g_last_rx_ms = HAL_GetTick();
-  // seq 누락 감지(단순): 이전 seq 대비 1씩 증가한다고 가정
-  static uint8_t last_seq = 0;
-  uint8_t expected = (uint8_t)(last_seq + 1);
-  if (g_rx_count > 1 && seq != expected) {
-    g_seq_miss_count++;
-  }
-  last_seq = seq;
+    g_seq = seq;
+    g_status = status;
+    g_rx_count++;
+    g_last_rx_ms = HAL_GetTick();
 
-  g_imu_new = 1;
+    static uint8_t last_seq = 0;
+    uint8_t expected = (uint8_t)(last_seq + 1);
+    if (g_rx_count > 1 && seq != expected) {
+        g_seq_miss_count++;
+    }
+    last_seq = seq;
 
-  // F407-DISC1: LD6(Blue) = PD15 :contentReference[oaicite:5]{index=5}
-  if ((seq % 100) == 0) {
-    HAL_GPIO_TogglePin(GPIOD, LD6_Pin);
-  }
+    // ISR에서는 플래그만 세움 (UART 전송은 main loop에서)
+    g_imu_new = 1;
+
+    // (선택) 수신 살아있음 표시: 100프레임마다 블루 토글
+    if ((seq % 100) == 0) {
+        HAL_GPIO_TogglePin(GPIOD, LD6_Pin);
+    }
+}
+
+/* ------------------------- UART RX Complete Callback ------------------------- */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART3)
+    {
+    	HAL_GPIO_TogglePin(GPIOD, LD3_Pin);
+        // 1바이트 수신 -> 라인 버퍼에 누적
+        char c = (char)u3_rx_byte;
+
+        if (c == '\r') {
+            // ignore
+        } else if (c == '\n') {
+            // 라인 완성
+            if (u3_line_len > 0) {
+                u3_line_buf[u3_line_len] = '\0';
+                // main loop에서 쓸 복사본 생성
+                strncpy(g_u3_line_copy, u3_line_buf, sizeof(g_u3_line_copy) - 1);
+                g_u3_line_copy[sizeof(g_u3_line_copy) - 1] = '\0';
+                g_u3_line_ready = 1;
+            }
+            // 버퍼 리셋
+            u3_line_len = 0;
+            memset(u3_line_buf, 0, sizeof(u3_line_buf));
+        } else {
+            if (u3_line_len < (sizeof(u3_line_buf) - 1)) {
+                u3_line_buf[u3_line_len++] = c;
+            } else {
+                // overflow -> 리셋
+                u3_line_len = 0;
+                memset(u3_line_buf, 0, sizeof(u3_line_buf));
+            }
+        }
+
+        // 다음 바이트 수신 재개
+        // (UART RX 콜백은 인터럽트 컨텍스트이므로 오래 걸리면 안 됨)
+        // 블로킹 transmit 같은 건 피하는 게 좋음 :contentReference[oaicite:3]{index=3}
+        (void)HAL_UART_Receive_IT(&huart3, &u3_rx_byte, 1);
+    }
 }
 /* USER CODE END 4 */
 
