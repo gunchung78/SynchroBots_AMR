@@ -10,13 +10,13 @@
 #include <boost/asio.hpp>
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/Vector3Stamped.h>
-// ----- battery -----
-#include <std_msgs/Float32.h>
-#include <sensor_msgs/BatteryState.h>
 
 //#define sampleFreq	20.5f				// sample frequency in Hz
 #define twoKpDef	1.0f				// (2.0f * 0.5f)	// 2 * proportional gain
 #define twoKiDef	0.0f				// (2.0f * 0.0f)	// 2 * integral gain
+#define OFFSET_COUNT 	200
+
+
 #define OFFSET_COUNT 	200
 
 class MyAGV
@@ -40,9 +40,6 @@ private:
 	void writeSpeed(double movex, double movey, double rot);
 	void restore();
 	void restoreRun();
-
-  // ----- battery -----
-  void updateBatteryPublish();
 
 	ros::Time currentTime, lastTime;
 
@@ -79,20 +76,6 @@ private:
   ros::Subscriber imu_sub_;
 	ros::NodeHandle n;
 	ros::Publisher pub_odom,pub_v,pub_imu,pub,pub_imu_raw;
-  // battery publishers
-  ros::Publisher pub_battery_state;
-  ros::Publisher pub_battery_voltage;
-  ros::Publisher pub_battery_percent;
-
-  // battery variables
-  double Battery_voltage;
-  double Backup_Battery_voltage;
-  double batt_v_full_;
-  double batt_v_empty_;
-  double batt_alpha_;
-  double batt_period_;
-  ros::Time last_batt_pub_;
-  double batt_v_filt_;
 	tf::TransformBroadcaster odomBroadcaster;
 };
 

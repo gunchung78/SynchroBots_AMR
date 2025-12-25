@@ -1,6 +1,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <std_msgs/Int8.h>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/utils.h>
@@ -17,9 +18,10 @@ public:
   {
     ros::NodeHandle pnh("~");
 
-    // params
+    // params  
     pnh.param("topic_amcl", topic_amcl_, std::string("/amcl_pose"));
     pnh.param("topic_odom", topic_odom_, std::string("/odom"));
+    pnh.param("topic_battery_pct", topic_battery_pct_, std::string("/battery_percent"));
     pnh.param("write_hz", write_hz_, 2.0);
 
     // stale 경고용
@@ -31,7 +33,8 @@ public:
     // subs
     sub_amcl_ = nh_.subscribe(topic_amcl_, 10, &AmrStateDbLoggerNode::onAmclPose, this);
     sub_odom_ = nh_.subscribe(topic_odom_, 10, &AmrStateDbLoggerNode::onOdom, this);
-
+    sub_batt_ = nh_.subscribe(topic_battery_pct_, 10, &AmrStateDbLoggerNode::onBatteryPct, this);
+    
     // ✅ service (bool enable)
     srv_ = nh_.advertiseService("set_status", &AmrStateDbLoggerNode::onSetStatus, this);
 
@@ -89,6 +92,17 @@ private:
     last_odom_rx_ = ros::Time::now();
   }
 
+  void onBatteryPct(const std_msgs::Int8::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    // battery_percent: Int8 (0~100) 가정
+    int v = static_cast<int>(msg->data);
+    if (v < 0) v = 0;
+    if (v > 100) v = 100;
+    battery_pct_ = static_cast<double>(v);
+    got_batt_ = true;
+    last_batt_rx_ = ros::Time::now();
+  }
+
   // ---- Timer (periodic DB insert) ----
   void onTimer(const ros::TimerEvent&) {
     AmrStateData d;
@@ -98,28 +112,33 @@ private:
       if (!enabled_) return;  // ✅ enable=false면 insert 중지
 
       const ros::Time now = ros::Time::now();
-      if (got_amcl_ && (now - last_amcl_rx_).toSec() > stale_warn_sec_) {
-        ROS_WARN_THROTTLE(5.0, "[DB] AMCL stale (%.2fs) but still logging",
-                          (now - last_amcl_rx_).toSec());
-      }
+//      if (got_amcl_ && (now - last_amcl_rx_).toSec() > stale_warn_sec_) {
+//        ROS_WARN_THROTTLE(5.0, "[DB] AMCL stale (%.2fs) but still logging",
+//                          (now - last_amcl_rx_).toSec());
+//      }
       if (got_odom_ && (now - last_odom_rx_).toSec() > stale_warn_sec_) {
         ROS_WARN_THROTTLE(5.0, "[DB] ODOM stale (%.2fs) but still logging",
                           (now - last_odom_rx_).toSec());
       }
 
       if (!std::isfinite(pos_x_) || !std::isfinite(pos_y_) ||
-          !std::isfinite(heading_) || !std::isfinite(speed_)) {
+          !std::isfinite(heading_) || !std::isfinite(speed_) ||
+          !std::isfinite(battery_pct_)) {
         ROS_WARN_THROTTLE(5.0, "[DB] non-finite data -> forced to 0");
         if (!std::isfinite(pos_x_)) pos_x_ = 0;
         if (!std::isfinite(pos_y_)) pos_y_ = 0;
         if (!std::isfinite(heading_)) heading_ = 0;
         if (!std::isfinite(speed_)) speed_ = 0;
+        if (!std::isfinite(battery_pct_)) battery_pct_ = 0;
       }
 
       d.pos_x = pos_x_;
       d.pos_y = pos_y_;
       d.heading = heading_;
-      d.battery_pct = battery_pct_; // 추후 배터리 토픽 연결
+      // DB에는 0~100(%)로 저장 (웹에서 그대로 쓰기 좋음)
+      if (battery_pct_ < 0) battery_pct_ = 0;
+      if (battery_pct_ > 100) battery_pct_ = 100;
+      d.battery_pct = battery_pct_;
       d.speed = speed_;
     }
 
@@ -132,7 +151,7 @@ private:
 
 private:
   ros::NodeHandle nh_;
-  ros::Subscriber sub_amcl_, sub_odom_;
+  ros::Subscriber sub_amcl_, sub_odom_, sub_batt_;
   ros::ServiceServer srv_;
   ros::Timer timer_;
 
@@ -140,17 +159,17 @@ private:
   std::mutex mtx_;
 
   // params/state
-  std::string topic_amcl_, topic_odom_;
+  std::string topic_amcl_, topic_odom_, topic_battery_pct_;
   double write_hz_ = 2.0;
   double stale_warn_sec_ = 1.0;
-  bool enabled_ = true;
+  bool enabled_ = false;
 
   // cached data
   double pos_x_ = 0, pos_y_ = 0, heading_ = 0;
   double speed_ = 0, battery_pct_ = 0;
 
-  bool got_amcl_ = false, got_odom_ = false;
-  ros::Time last_amcl_rx_, last_odom_rx_;
+  bool got_amcl_ = false, got_odom_ = false, got_batt_ = false;
+  ros::Time last_amcl_rx_, last_odom_rx_, last_batt_rx_;
 };
 
 int main(int argc, char** argv) {

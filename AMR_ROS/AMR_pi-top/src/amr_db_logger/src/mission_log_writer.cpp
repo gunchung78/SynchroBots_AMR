@@ -416,10 +416,10 @@ bool MissionLogWriter::handleMissionUpdate(const MissionRequestData& in,
   }
 
   // 2) active 없으면 새 mission 생성
-  //    - status가 비어있으면 기본값으로 생성(원하면 WAITING 고정)
+  //    - status가 비어있으면 기본값으로 생성(원하면 RUNNING 고정)
   if (active_mission_id_ == 0) {
     uint64_t new_id = 0;
-    const std::string create_status = has_status ? in.status : "WAITING";
+    const std::string create_status = has_status ? in.status : "RUNNING";
     if (!createNewMissionLocked(create_status, new_id)) return false;
     active_mission_id_ = new_id;
     active_status_ = create_status;

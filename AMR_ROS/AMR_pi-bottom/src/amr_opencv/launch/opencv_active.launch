@@ -1,62 +1,28 @@
 <launch>
-  <!-- Camera publisher -->
-  <node pkg="amr_opencv"
-        type="camera_pub.py"
-        name="camera_pub"
-        output="screen" />
-
-  <!-- Lane detector (red lane) -->
-  <arg name="image_topic" default="/camera/image_raw"/>
-  <arg name="camera_frame" default="camera_link"/>
-
-  <node pkg="amr_opencv"
-        type="lane_detector.py"
-        name="lane_detector"
-        output="screen">
-    <param name="image_topic" value="$(arg image_topic)"/>
-    <param name="camera_frame" value="$(arg camera_frame)"/>
-
-    <!-- HSV ranges for RED lane (initial values, tune as needed) -->
-    <param name="lower_red1_h" value="0"/>
-    <param name="lower_red1_s" value="100"/>
-    <param name="lower_red1_v" value="20"/>
-    <param name="upper_red1_h" value="10"/>
-    <param name="upper_red1_s" value="255"/>
-    <param name="upper_red1_v" value="255"/>
-
-    <param name="lower_red2_h" value="160"/>
-    <param name="lower_red2_s" value="100"/>
-    <param name="lower_red2_v" value="20"/>
-    <param name="upper_red2_h" value="180"/>
-    <param name="upper_red2_s" value="255"/>
-    <param name="upper_red2_v" value="255"/>
-
-    <!-- ROI & Hough settings -->
-    <param name="roi_y_ratio" value="0.5"/>
-    <param name="hough_rho" value="1.0"/>
-    <param name="hough_theta_deg" value="1.0"/>
-    <param name="hough_threshold" value="30"/>
-    <param name="hough_min_line_length" value="50"/>
-    <param name="hough_max_line_gap" value="50"/>
-    <param name="min_abs_slope" value="0.3"/>
-    <param name="meters_per_pixel_x" value="0.002"/>
-
-    <param name="enable_debug_image" value="true"/>
-  </node>
-  
-  <!-- Lane follower (unchanged) -->
-  <node pkg="amr_opencv"
-        type="lane_follower.py"
-        name="lane_follower"
-        output="screen">
-    <param name="pose_topic" value="/lane/pose"/>
-    <param name="cmd_vel_topic" value="/cmd_vel"/>
-    <param name="forward_speed" value="0.1"/>
-    <param name="k_lat" value="1.5"/>
-    <param name="k_yaw" value="1.0"/>
-    <param name="max_linear" value="0.2"/>
-    <param name="max_angular" value="0.8"/>
-  </node>
-
-
+    <node pkg="amr_opencv" type="amr_aruco_all_in_one.py" name="amr_aruco_all_in_one" output="screen">
+      <param name="camera_id" value="0"/>
+      <param name="cmd_vel_topic" value="/cmd_vel"/>
+      <param name="display" value="true"/>
+    
+      <!-- distance thresholds -->
+      <param name="far_cm" value="70.0"/>
+      <param name="mid_cm_low" value="35.0"/>
+      <param name="mid_cm_high" value="70.0"/>
+    
+      <!-- arrival cm by id -->
+      <rosparam param="arrival_cm_by_id">{ "1": 40.0, "2": 35.0, "5": 20.0, "6": 20.0 }</rosparam>
+    
+      <!-- id6 -->
+      <param name="id6_extra_cm" value="20.0"/>
+      <param name="id6_extra_speed" value="0.12"/>
+      
+      <!-- speed -->
+      <param name="forward_speed" value="0.08"/>
+      <param name="nudge_speed" value="0.05"/>
+      <param name="nudge_time" value="0.20"/>
+    
+      <!-- search -->
+      <param name="search_steps_each_side" value="4"/>
+      <param name="search_check_frames" value="14"/>
+    </node>
 </launch>

@@ -32,7 +32,7 @@ def main():
 
     imu_pub = rospy.Publisher("/imu_data", Imu, queue_size=10)
 
-    ser = serial.Serial('/dev/serial0', 115200, timeout=1)
+    ser = serial.Serial('/dev/ttyAMA1', 115200, timeout=1)
     rospy.loginfo("[IMU UART] OPEN: %s", ser.is_open)
     rate = rospy.Rate(100)  
 
